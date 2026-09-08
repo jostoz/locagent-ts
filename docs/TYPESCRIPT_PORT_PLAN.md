@@ -164,11 +164,42 @@ limpio en stdout; `search_code_entities("z order bring to front")` → `zorder.t
 `BringToFrontIcon`; `traverse(LayerButtons, upstream)` → `renders-by ShapeFormatToolbar/
 ImageFormatToolbar`; warm start recarga cache sin rebuild.
 
-## Fase 4 — Eval (1-2 días, opcional — la parte "researcher")
+## Fase 4 — Paper: estudio empírico (DIFERIDA — no ahora)
 
-- `eval/miro_clone_localization.jsonl`: 20-30 casos etiquetados a mano ("dada esta tarea, qué archivos/funciones son relevantes"): toolbar, sticky notes, z-order, slide layouts, export PPTX.
-- Métricas de `evaluation/eval_metric.py` (acc@k a nivel archivo y función).
-- Comparar: (a) qwen-Cline sin retrieval, (b) + `search_codebase` nativo, (c) + LocAgent-TS MCP, (d) + Serena. → responde "¿valió la pena vs Serena?" con datos.
+**Decisión (2026-09-08):** la Fase 4 **no se ejecuta todavía**. Cuando se retome, se
+materializa como un **paper de estudio empírico** (ambición: conferencia), no como un
+script de eval suelto. Las Fases 0–3 (el sistema) ya están completas y commiteadas.
+
+**Pregunta de investigación:** ¿el retrieval guiado por grafo (LocAgent-TS MCP) mejora la
+localización de código para un agente con ventana de contexto chica (qwen-2.5-coder-32B en
+Cline) sobre un codebase TS/React con archivos gigantes, frente a: sin retrieval, la
+búsqueda nativa del agente, y retrieval por LSP (Serena)?
+
+**Condiciones:** (a) qwen-Cline sin retrieval · (b) + `search_codebase` nativo · (c) +
+LocAgent-TS MCP · (d) + Serena.
+**Ablations de (c):** sin edge `renders`; sin `invokes`; solo BM25 vs BM25 + fuzzy + `traverse`.
+
+**Métricas:** acc@k y recall@k a nivel archivo y a nivel función/entidad, k ∈ {1, 3, 5, 10}.
+Nota: reimplementar acc@k / recall@k **sin `torch`** — las de `evaluation/eval_metric.py`
+importan `torch`, que no está en `requirements-ts.txt`; numpy puro, ~30 líneas.
+
+**Corpus:** solo miro-clone. `eval/miro_clone_localization.jsonl` — 25-30 tareas etiquetadas
+a mano sobre `C:/Users/joz/orca/workspaces/miro-clone/bichir` (toolbar, sticky notes,
+z-order, slide layouts, export PPTX, crop, frames, AI chat). Cada caso: prompt de tarea +
+conjunto ground-truth de archivos/entidades relevantes. Encuadrado como **case study a
+fondo**, no como benchmark multi-repo.
+
+**Amenazas a la validez (a documentar en el paper):** un solo repo → validez externa
+limitada (riesgo de revisor: señalarlo explícito y encuadrarlo como case study);
+`invokes` / `renders` son heurísticos por nombre (sin tipos); el etiquetado lo hace el
+autor → mitigar con un criterio de relevancia escrito y, de ser posible, doble etiquetado.
+
+**Artefactos cuando se retome:** `docs/PAPER.md` (o LaTeX), `eval/` (harness + `.jsonl` +
+métrica torch-free + runner), tablas/figuras. Related work a cubrir: LocAgent (ACL 2025),
+Serena / agentes sobre LSP, Aider repo-map, herramientas de grafo de código sobre tree-sitter.
+
+**Esfuerzo estimado:** etiquetado + harness ~2-3 días; corridas de las 4 condiciones +
+ablations ~2 días; redacción ~1 semana.
 
 ## Verificación end-to-end
 
@@ -176,7 +207,31 @@ ImageFormatToolbar`; warm start recarga cache sin rebuild.
 2. Spot-check: nodo del componente de la barra tiene aristas `renders` entrantes de su contenedor + `imports` correctas.
 3. MCP: `search_code_entities("toolbar")` → el componente correcto; `get_entity(id, "full")` → ~150 líneas, no 7.565.
 4. Cline + qwen con el MCP: "estandarizá los estilos de la barra" → llama `search_code_entities` → `get_entity` → edita el trozo acotado, sin `read_files` del archivo entero, sin `cd ..`.
-5. Fase 4: acc@5 a nivel archivo de (c) > (a) y (b); comparar con (d).
+5. (diferida) Fase 4: acc@5 a nivel archivo de (c) > (a) y (b); comparar con (d).
+
+## Integración con clientes MCP
+
+`locagent_mcp.py` es un server MCP stdio genérico — mismo binario para cualquier
+cliente. Confinado a `LOCAGENT_REPO` (o `cwd`); cache en `LOCAGENT_CACHE_DIR` (o
+`<repo>/.locagent/`).
+
+- **Cline** — `~/.cline/data/settings/cline_mcp_settings.json` (hecho, Fase 3):
+  `command` = el `python.exe` del `.venv`, `args` = ruta del script, `cwd` = repo
+  objetivo, `env` con `LOCAGENT_CACHE_DIR`. Backup en `.bak-locagent`.
+
+- **OMP** (oh-my-pi, `omp.sh`) — `.omp/mcp.json` project-level en la raíz del repo.
+  Plantillas y pasos en [`docs/omp/`](omp/). Puntos: `timeout: 120000` (el primer
+  `tools/call` construye el grafo, lazy; default OMP = 30 s); regla sticky
+  `.omp/RULES.md` que encadena `locagent` (localizar) → `lsp` (verificar tipos) →
+  `edit` hashline; `/mcp reload` tras agregar archivos. Cableado real:
+  `C:/Users/joz/Documents/miro-clone` (Vite+React+TS, `Board.tsx` 9k líneas).
+  Instalación: `irm https://omp.sh/install.ps1 | iex` (binario nativo win32-x64).
+  OMP también auto-descubre `.cline/` y `.claude/` de un repo, pero gana el `.omp/`
+  explícito.
+
+- **Claude Code** — `.mcp.json` en la raíz del proyecto, o
+  `claude mcp add locagent -e LOCAGENT_REPO=<repo> -- <venv python> locagent_mcp.py`.
+  Tools namespaced `mcp__locagent__*`. (El mismo `.mcp.json` lo hereda OMP.)
 
 ## Riesgos / caveats
 
@@ -184,11 +239,13 @@ ImageFormatToolbar`; warm start recarga cache sin rebuild.
 - **Prompts de LocAgent** (`util/prompts/*.j2`) mencionan idioms Python → edición ligera.
 - **Repo research, no librería mantenida** → asperezas de setup.
 - **Barrels/re-exports y monorepos**: cola larga más allá del v1.
-- Esfuerzo: **~1 semana v1** (Fases 0-3), +1-2 días el eval.
+- Esfuerzo: **~1 semana v1** (Fases 0-3) — **hecho y commiteado**. Lo que resta es el paper (Fase 4, diferida).
 
 ## Archivos
 
-**Nuevos:** `dependency_graph/ts_build_graph.py`, `dependency_graph/queries/typescript.scm`, `dependency_graph/queries/tsx.scm`, `dependency_graph/ts_resolver.py`, `dependency_graph/ts_bm25.py`, `plugins/location_tools/utils/compress_file_ts.py`, `locagent_mcp.py`, `requirements-ts.txt`, `NOTICE`, `eval/miro_clone_localization.jsonl`
+**Nuevos:** `dependency_graph/ts_build_graph.py`, `dependency_graph/queries/typescript.scm`, `dependency_graph/queries/tsx.scm`, `dependency_graph/ts_resolver.py`, `dependency_graph/ts_bm25.py`, `plugins/location_tools/utils/compress_file_ts.py`, `locagent_mcp.py`, `requirements-ts.txt`, `NOTICE`, `docs/omp/` (plantillas `mcp.json` + `RULES.md` + `README.md` para OMP), `eval/miro_clone_localization.jsonl` _(Fase 4, diferido)_
+
+**Fuera del repo:** `C:/Users/joz/Documents/miro-clone/.omp/{mcp.json,RULES.md}` (config OMP del proyecto real, sin versionar acá)
 
 **Modificados:** `dependency_graph/build_graph.py` (`VALID_EDGE_TYPES` += `renders`; `matplotlib` a import lazy), `dependency_graph/traverse_graph.py` (`is_test_file` convención JS/TS; `global_name_dict` no-`.py`), `plugins/__init__.py` + `plugins/location_tools/__init__.py` (harness import opcional), `README.md`, `util/prompts/*.j2` (ligero), `~/.cline/data/settings/cline_mcp_settings.json`
 

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json",
+  "mcpServers": {
+    "locagent": {
+      "command": "C:/Users/joz/orca/projects/locagent-ts/.venv/Scripts/python.exe",
+      "args": ["C:/Users/joz/orca/projects/locagent-ts/locagent_mcp.py"],
+      "env": {
+        "LOCAGENT_REPO": "<RUTA_ABSOLUTA_DEL_PROYECTO>",
+        "LOCAGENT_CACHE_DIR": "C:/Users/joz/orca/projects/locagent-ts/.locagent-cache/<slug>",
+        "PYTHONUNBUFFERED": "1",
+        "PYTHONWARNINGS": "ignore",
+        "PYTHONIOENCODING": "utf-8"
+      },
+      "enabled": true,
+      "timeout": 120000
+    }
+  }
+}
