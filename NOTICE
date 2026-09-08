@@ -1,0 +1,43 @@
+LocAgent-TS
+Copyright 2025 Josue Tostado
+
+This product is a fork of LocAgent ("Graph-Guided LLM Agents for Code Localization")
+Copyright 2025 gersteinlab (https://github.com/gersteinlab/LocAgent)
+Licensed under the Apache License, Version 2.0. See LICENSE.
+
+Paper: https://arxiv.org/abs/2503.09089 (ACL 2025)
+
+------------------------------------------------------------------------
+Modifications made in this fork (branch feat/typescript-support)
+------------------------------------------------------------------------
+
+The upstream project parses Python source with the standard library `ast`
+module to build a heterogeneous code graph (dependency_graph/build_graph.py).
+This fork adds a parallel TypeScript/TSX front end built on tree-sitter, plus
+a Model Context Protocol (MCP) server so the graph-guided retrieval tools can
+be used from MCP clients such as Cline.
+
+New files:
+  dependency_graph/ts_build_graph.py        - tree-sitter graph builder for .ts/.tsx/.js/.jsx
+  dependency_graph/ts_resolver.py           - TS/TSX module + path-alias import resolution
+  dependency_graph/ts_bm25.py               - self-contained BM25 index over graph nodes (bm25s)
+  dependency_graph/queries/typescript.scm   - tree-sitter capture queries (typescript grammar)
+  dependency_graph/queries/tsx.scm          - tsx-grammar deltas (JSX)
+  plugins/location_tools/utils/compress_file_ts.py - tree-sitter skeletonizer (replaces the libcst one for TS)
+  locagent_mcp.py                           - FastMCP server exposing the retrieval tools
+  requirements-ts.txt                       - minimal runtime dependency set
+  NOTICE                                    - this file
+
+Modified files:
+  dependency_graph/build_graph.py           - add EDGE_TYPE_RENDERS to VALID_EDGE_TYPES; optional --language dispatch
+  README.md                                 - fork overview / setup section
+  util/prompts/*.j2                          - light edits removing Python-specific idioms
+
+Reused from upstream without functional change:
+  dependency_graph/traverse_graph.py
+  plugins/location_tools/retriever/fuzzy_retriever.py
+  evaluation/eval_metric.py
+
+The upstream training/evaluation stack (requirements.txt: torch, CUDA, datasets,
+faiss, llama-index, libcst, matplotlib) is not used by this fork's runtime path
+and is not installed by requirements-ts.txt.

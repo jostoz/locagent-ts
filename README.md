@@ -13,6 +13,28 @@
 > [Documentation](https://docs.codenib.ai/agent_integrations/#locagent) · [Adapter](https://github.com/sysevol-ai/CodeNib/blob/main/codenib/clients/locagent_agent.py) · [Provider](https://github.com/sysevol-ai/CodeNib/blob/main/codenib/integrations/locagent.py)
 
 
+---
+
+## 🔀 Fork: TypeScript/TSX support + MCP (`locagent-ts`)
+
+This branch (`feat/typescript-support`) is a fork that adds a **tree-sitter front
+end for TypeScript/TSX/JS** alongside the original Python `ast` graph builder, and
+an **MCP server** so the graph-guided retrieval tools can be driven from MCP
+clients such as [Cline](https://github.com/cline/cline). Goal: give a small-context
+local model graph-guided retrieval over a large TS codebase instead of truncated
+whole-file reads. See [`docs/TYPESCRIPT_PORT_PLAN.md`](docs/TYPESCRIPT_PORT_PLAN.md)
+for the full plan and [`NOTICE`](NOTICE) for the list of changes over upstream.
+
+**Minimal setup (runtime only, no training/eval stack):**
+```
+py -3.12 -m venv .venv
+.venv\Scripts\activate            # PowerShell: .venv\Scripts\Activate.ps1
+pip install -r requirements-ts.txt   # 7 packages
+```
+Python 3.12 is required (`tree-sitter-languages==1.10.2` has no 3.13 wheels).
+
+---
+
 ## ℹ️ Overview
 We introduce **LocAgent**, a framework that addresses code localization through graph-based representation.
 By parsing codebases into directed heterogeneous graphs, LocAgent creates a lightweight representation that captures code structures and their dependencies, enabling LLM agents to effectively search and locate relevant entities through powerful multi-hop reasoning.

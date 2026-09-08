@@ -1,0 +1,14 @@
+# Minimal runtime deps for the TypeScript/TSX port + MCP server.
+# NOT requirements.txt (that is the ~180-package training/eval stack: torch, CUDA,
+# datasets, faiss, llama-index, libcst, matplotlib). This file is what the
+# graph builder + BM25 index + fuzzy retriever + MCP server actually import.
+#
+# Python 3.12 (tree-sitter-languages 1.10.2 has no cp313 wheels).
+
+networkx==3.4.2                  # heterogeneous code graph (already a LocAgent dep)
+tree-sitter==0.21.3             # parser runtime (already a LocAgent dep)
+tree-sitter-languages==1.10.2   # prebuilt typescript/tsx grammars (already a LocAgent dep)
+bm25s==0.2.3                    # fuzzy BM25 over graph nodes (ts_bm25.py)
+PyStemmer==2.2.0.3             # stemming backend for bm25s
+rapidfuzz==3.10.1             # fuzzy_retriever.py
+mcp==1.13.1                    # MCP server SDK (FastMCP) for Cline integration

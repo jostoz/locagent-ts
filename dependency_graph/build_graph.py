@@ -6,8 +6,8 @@ from collections import Counter, defaultdict
 from typing import List
 
 import networkx as nx
-import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
+# matplotlib is only needed by visualize_graph(); it is not in requirements-ts.txt,
+# so import it lazily inside that function instead of at module load.
 
 VERSION = 'v2.3'
 NODE_TYPE_DIRECTORY = 'directory'
@@ -18,9 +18,13 @@ EDGE_TYPE_CONTAINS = 'contains'
 EDGE_TYPE_INHERITS = 'inherits'
 EDGE_TYPE_INVOKES = 'invokes'
 EDGE_TYPE_IMPORTS = 'imports'
+# TS/TSX port: UI analogue of `invokes` -- a component rendering another component
+# via a JSX tag. Added here so traversal/tools treat it like any other edge type.
+EDGE_TYPE_RENDERS = 'renders'
 
 VALID_NODE_TYPES = [NODE_TYPE_DIRECTORY, NODE_TYPE_FILE, NODE_TYPE_CLASS, NODE_TYPE_FUNCTION]
-VALID_EDGE_TYPES = [EDGE_TYPE_CONTAINS, EDGE_TYPE_INHERITS, EDGE_TYPE_INVOKES, EDGE_TYPE_IMPORTS]
+VALID_EDGE_TYPES = [EDGE_TYPE_CONTAINS, EDGE_TYPE_INHERITS, EDGE_TYPE_INVOKES, EDGE_TYPE_IMPORTS,
+                    EDGE_TYPE_RENDERS]
 
 SKIP_DIRS = ['.github', '.git']
 def is_skip_dir(dirname):
@@ -632,6 +636,9 @@ def analyze_invokes(node, code_tree, graph, repo_path):
 
 
 def visualize_graph(G):
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+
     node_types = set(nx.get_node_attributes(G, 'type').values())
     node_shapes = {NODE_TYPE_CLASS: 'o', NODE_TYPE_FUNCTION: 's', NODE_TYPE_FILE: 'D',
                    NODE_TYPE_DIRECTORY: '^'}
