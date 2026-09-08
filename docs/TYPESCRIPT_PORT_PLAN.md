@@ -98,12 +98,34 @@ Nuevo `dependency_graph/ts_build_graph.py`. Reutiliza el ensamblado networkx, el
 6. **`invokes`** — reemplaza `analyze_invokes`/`find_all_possible_callee`: walk de `call_expression`; callee `identifier` o `member_expression.property`; **match por nombre** contra nodos función/método conocidos (misma limitación heurística que la versión Python `ast`). Saltear defs anidadas.
 7. **Nuevo edge `renders`** (TS, alto valor): opening tag de `jsx_element`/`jsx_self_closing_element` con identificador PascalCase → nodo componente. Análogo UI de `invokes`. Agregar a `VALID_EDGE_TYPES` en `build_graph.py`; traversía/tools lo tratan como cualquier arista.
 
-## Fase 2 — Índice propio + reuso (½-1 día)
+## Fase 2 — Índice propio + reuso (½-1 día)  ✅
 
-- **`ts_bm25.py` propio** con `bm25s` sobre los nodos del grafo (`name` + `code` + skeleton).
-- Reusar `dependency_graph/traverse_graph.py` tal cual.
-- Reusar `plugins/location_tools/retriever/fuzzy_retriever.py` (ajuste mínimo si hace falta).
-- **`compress_file_ts.py`**: skeletonizer tree-sitter (elide cuerpos, deja firma + JSDoc). El `compress_file.py` original (libcst) queda para Python.
+**Estado (2026-09-08): completo, verificado sobre miro-clone.**
+
+- ✅ **`dependency_graph/ts_bm25.py`** — `bm25s` + PyStemmer, 1 doc por nodo file/class/function
+  (nid + `_split_identifiers` camelCase/snake/kebab + skeleton + `code` capado a 4k chars). Excluye
+  tests. `TsBM25Index.from_graph(g)` → `.retrieve(q, k, search_scope, include_files, return_scores)`
+  + `.save()`/`.load()` (usa `bm25s.BM25.save/load` + `ts_index.json`). Indexa 672 nodos en ~0.45s.
+  Queries de prueba ("selection toolbar styling", "z order bring to front", "export deck to pptx",
+  "crop image overlay") devuelven la entidad correcta en top-3. Mucho mejor que fuzzy solo.
+- ✅ **`traverse_graph.py`** reusado con 2 ajustes mínimos (documentados en NOTICE):
+  - `is_test_file`: agrega convención JS/TS (`*.test.*`, `*.spec.*`, `__tests__/`, `__mocks__/`,
+    `*.stories.*`). Antes `Board.test.tsx` NO se detectaba como test → tests contaminaban el retrieval.
+  - `RepoEntitySearcher.global_name_dict[_lowercase]`: `nid.endswith('.py')` → check por
+    `type == NODE_TYPE_FILE` (indexa basename + stem de cualquier extensión). Refactor a
+    `_build_name_dict(lowercase)` compartido. Comportamiento Python idéntico.
+  - `traverse_graph_structure` (encode `pydot`) necesita `pydot` (no está en requirements-ts) → el
+    MCP usará `traverse_tree_structure` / `traverse_json_structure` (sin deps extra), que además son
+    mejor input para un LLM.
+- ✅ **`fuzzy_retriever.py`** reusado **tal cual** (verificado: corre sobre el grafo TS sin cambios).
+- ✅ **`plugins/location_tools/utils/compress_file_ts.py`** — skeletonizer tree-sitter: reemplaza cada
+  `statement_block` de función/método/arrow por `{ ... }` vía splice de bytes (shallowest-only, no
+  recursa en cuerpos ya elididos). Mantiene imports, JSDoc, firmas, tipos, top-level. API:
+  `get_skeleton(raw_code, keep_constant=True, language=None, filename=None)`. Board.tsx: 7566 → 695
+  líneas en 33ms. El `compress_file.py` original (libcst) queda para Python.
+- ✅ **`plugins/__init__.py` + `plugins/location_tools/__init__.py`** — el import del harness
+  (`locationtools` → `repo_ops` → `bm25_retriever` → `llama_index`) va en `try/except
+  ModuleNotFoundError` para que los módulos hoja bajo `plugins/` sean importables en el runtime mínimo.
 
 ## Fase 3 — Servidor MCP (½-1 día)
 
@@ -141,9 +163,9 @@ Nuevo `dependency_graph/ts_build_graph.py`. Reutiliza el ensamblado networkx, el
 
 **Nuevos:** `dependency_graph/ts_build_graph.py`, `dependency_graph/queries/typescript.scm`, `dependency_graph/queries/tsx.scm`, `dependency_graph/ts_resolver.py`, `dependency_graph/ts_bm25.py`, `plugins/location_tools/utils/compress_file_ts.py`, `locagent_mcp.py`, `requirements-ts.txt`, `NOTICE`, `eval/miro_clone_localization.jsonl`
 
-**Modificados:** `dependency_graph/build_graph.py` (`VALID_EDGE_TYPES` += `renders`, dispatch `--language` opcional), `README.md`, `util/prompts/*.j2` (ligero), `~/.cline/data/settings/cline_mcp_settings.json`
+**Modificados:** `dependency_graph/build_graph.py` (`VALID_EDGE_TYPES` += `renders`; `matplotlib` a import lazy), `dependency_graph/traverse_graph.py` (`is_test_file` convención JS/TS; `global_name_dict` no-`.py`), `plugins/__init__.py` + `plugins/location_tools/__init__.py` (harness import opcional), `README.md`, `util/prompts/*.j2` (ligero), `~/.cline/data/settings/cline_mcp_settings.json`
 
-**Reutilizados sin cambios:** `dependency_graph/traverse_graph.py`, `plugins/location_tools/retriever/fuzzy_retriever.py`, `repo_index/codeblocks/parser/*` (referencia), `evaluation/eval_metric.py`
+**Reutilizados sin cambios:** `plugins/location_tools/retriever/fuzzy_retriever.py`, `repo_index/codeblocks/parser/*` (referencia), `evaluation/eval_metric.py`
 
 ## Referencias
 

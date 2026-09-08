@@ -12,8 +12,14 @@ from dependency_graph.build_graph import (
 
 def is_test_file(nid):
     # input node id (e.g., 'tests/_core.py:test') and output whether it belongs to a test file
-    file_path = nid.split(':')[0]
-    word_list = re.split(r" |_|\/", file_path.lower())  # split by ' ', '_', and '/'
+    file_path = nid.split(':')[0].lower()
+    # JS/TS conventions: foo.test.tsx, foo.spec.ts, __tests__/, __mocks__/, foo.stories.tsx
+    if any(tok in file_path for tok in ('__tests__', '__mocks__')):
+        return True
+    basename = file_path.rsplit('/', 1)[-1]
+    if any(marker in basename for marker in ('.test.', '.spec.', '.stories.', '_test.', '_spec.')):
+        return True
+    word_list = re.split(r" |_|\/", file_path)  # split by ' ', '_', and '/'
     return any([word.startswith('test') for word in word_list])
 
 
@@ -57,47 +63,35 @@ class RepoEntitySearcher:
             etype: i for i, etype in enumerate(VALID_EDGE_TYPES)
         }
 
+    def _build_name_dict(self, lowercase):
+        name_dict = defaultdict(list)
+        for nid in self.G.nodes():
+            if is_test_file(nid):
+                continue
+            ntype = self.G.nodes[nid].get('type')
+            if ntype == NODE_TYPE_FILE:
+                # index by basename (with ext) and by stem, any language
+                fname = nid.split('/')[-1]
+                stem = fname.rsplit('.', 1)[0] if '.' in fname else fname
+                if lowercase:
+                    fname, stem = fname.lower(), stem.lower()
+                name_dict[fname].append(nid)
+                name_dict[stem].append(nid)
+            elif ':' in nid:
+                name = nid.split(':')[-1].split('.')[-1]
+                name_dict[name.lower() if lowercase else name].append(nid)
+        return name_dict
+
     @property
     def global_name_dict(self):
         if self._global_name_dict is None:  # Compute only once
-            _global_name_dict = defaultdict(list)
-            for nid in self.G.nodes():
-                if is_test_file(nid): continue
-
-                if nid.endswith('.py'):
-                    fname = nid.split('/')[-1]
-                    _global_name_dict[fname].append(nid)
-
-                    name = nid[:-(len('.py'))].split('/')[-1]
-                    _global_name_dict[name].append(nid)
-
-                elif ':' in nid:
-                    name = nid.split(':')[-1].split('.')[-1]
-                    _global_name_dict[name].append(nid)
-
-            self._global_name_dict = _global_name_dict
+            self._global_name_dict = self._build_name_dict(lowercase=False)
         return self._global_name_dict
-
 
     @property
     def global_name_dict_lowercase(self):
         if self._global_name_dict_lowercase is None:  # Compute only once
-            _global_name_dict_lowercase = defaultdict(list)
-            for nid in self.G.nodes():
-                if is_test_file(nid): continue
-
-                if nid.endswith('.py'):
-                    fname = nid.split('/')[-1].lower()
-                    _global_name_dict_lowercase[fname].append(nid)
-
-                    name = nid[:-(len('.py'))].split('/')[-1].lower()
-                    _global_name_dict_lowercase[name].append(nid)
-
-                elif ':' in nid:
-                    name = nid.split(':')[-1].split('.')[-1].lower()
-                    _global_name_dict_lowercase[name].append(nid)
-
-            self._global_name_dict_lowercase = _global_name_dict_lowercase
+            self._global_name_dict_lowercase = self._build_name_dict(lowercase=True)
         return self._global_name_dict_lowercase
 
 

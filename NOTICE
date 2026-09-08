@@ -29,12 +29,19 @@ New files:
   NOTICE                                    - this file
 
 Modified files:
-  dependency_graph/build_graph.py           - add EDGE_TYPE_RENDERS to VALID_EDGE_TYPES; optional --language dispatch
+  dependency_graph/build_graph.py           - add EDGE_TYPE_RENDERS to VALID_EDGE_TYPES;
+                                              matplotlib import made lazy (visualize_graph only)
+  dependency_graph/traverse_graph.py        - is_test_file(): recognise JS/TS test conventions
+                                              (*.test.*, *.spec.*, __tests__/, __mocks__/, *.stories.*);
+                                              RepoEntitySearcher.global_name_dict[_lowercase]: index
+                                              file nodes of any extension, not just .py (shared
+                                              _build_name_dict helper; Python behaviour unchanged)
+  plugins/__init__.py                        - guard the optional benchmark-harness import so leaf
+  plugins/location_tools/__init__.py           modules stay importable without llama_index/datasets
   README.md                                 - fork overview / setup section
   util/prompts/*.j2                          - light edits removing Python-specific idioms
 
 Reused from upstream without functional change:
-  dependency_graph/traverse_graph.py
   plugins/location_tools/retriever/fuzzy_retriever.py
   evaluation/eval_metric.py
 
