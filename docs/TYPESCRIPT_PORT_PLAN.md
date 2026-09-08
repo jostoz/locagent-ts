@@ -127,15 +127,42 @@ Nuevo `dependency_graph/ts_build_graph.py`. Reutiliza el ensamblado networkx, el
   (`locationtools` → `repo_ops` → `bm25_retriever` → `llama_index`) va en `try/except
   ModuleNotFoundError` para que los módulos hoja bajo `plugins/` sean importables en el runtime mínimo.
 
-## Fase 3 — Servidor MCP (½-1 día)
+## Fase 3 — Servidor MCP (½-1 día)  ✅
 
-- `locagent_mcp.py` con el SDK `mcp` (`FastMCP`). Herramientas:
-  - `search_code_entities(keywords)` → `ts_bm25` + `fuzzy_retriever` → entidades ranked con file:line
-  - `traverse(entity_id, edge_types, hops)` → vecindario vía `traverse_graph`
-  - `get_entity(entity_id, mode="skeleton"|"full")` → código o esqueleto del nodo
-  - `get_repo_overview()` → árbol de directorios + entidades top-level
-- Al arrancar: construir (o cargar cache) grafo + BM25 **solo de la raíz del cwd** (confinar = "cero vagabundeo por `..`"). Cache en `.locagent/` del repo *objetivo*. v1 rebuild completo al arrancar.
-- Corregir `C:\Users\joz\.cline\data\settings\cline_mcp_settings.json`: `"args": ["C:/Users/joz/orca/projects/locagent-ts/locagent_mcp.py"]` + `cwd` del worktree objetivo. (Hoy `/ruta/a/LocAgent/...` — placeholder muerto que falla en silencio cada arranque de Cline.)
+**Estado (2026-09-08): `locagent_mcp.py` funcional, probado sobre miro-clone vía protocolo stdio real.**
+
+- ✅ `locagent_mcp.py` con `mcp==1.13.1` (`FastMCP`, transport `stdio`). 4 tools:
+  - `search_code_entities(query, max_results=10, scope="all"|"function"|"class"|"file")` →
+    **fusión RRF** de `ts_bm25` + `fuzzy_retriever` → lista con id, tipo, `file:line`, firma corta,
+    flag `[component]`.
+  - `get_entity(entity_id, mode="skeleton"|"full")` → skeleton (attr del nodo, o `compress_file_ts`
+    para files) o código con números de línea. `full` sobre entidad > 400 líneas devuelve skeleton +
+    aviso (Board = 6325 líneas → no se inlinea). `_resolve_id` tolera nombre pelado / falta de prefijo
+    de dir / `file:Entity` sin path / `Clase.metodo`.
+  - `traverse(entity_id, edge_types?, direction="both"|"downstream"|"upstream", hops=2)` →
+    `traverse_tree_structure` (árbol indentado; **sin `pydot`**). Cap 6k chars.
+  - `get_repo_overview(max_depth=3)` → árbol de directorios/archivos (con nº de entidades por file) +
+    conteos de nodos/aristas.
+- ✅ Confinamiento: build sólo de `REPO` (= `cwd` o `$LOCAGENT_REPO`). `os.walk` poda `SKIP_DIRS` +
+  dotdirs. Cero `..`.
+- ✅ Cache: `<repo>/.locagent/` (graph.pkl + bm25/ + `signature`). `$LOCAGENT_CACHE_DIR` la reubica
+  (para árboles read-only — p.ej. el repo de prueba). Firma = sha256 de (path|mtime|size) de todos
+  los fuentes + `_CACHE_SCHEMA`; si no coincide → rebuild. Repo no-escribible → corre sin cache.
+- ✅ **Pureza de stdout**: `_protect_stdout()` (ctx mgr, swap `sys.stdout`→`stderr`) envuelve el build
+  y las llamadas a `bm25s` en request-time — el log "Building index..." de `bm25s` no corrompe el
+  JSON-RPC. `logging.getLogger('bm25s')` a WARNING.
+- ✅ **NO** usar `from __future__ import annotations` en el server: `mcp` 1.13.x introspecciona
+  `param.annotation` cruda y explota con genéricos stringificados (`Optional[List[str]]`).
+- ✅ `~/.cline/data/settings/cline_mcp_settings.json` corregido (había `command: "python"` +
+  `args: ["/ruta/a/LocAgent/locagent_mcp.py"]` — placeholder muerto). Ahora: `command` = el
+  `python.exe` del `.venv`, `args` = ruta real del script, `cwd` = repo objetivo, `env` con
+  `LOCAGENT_CACHE_DIR` (fuera del repo read-only) + `PYTHONWARNINGS/PYTHONIOENCODING`.
+  Backup en `cline_mcp_settings.json.bak-locagent`.
+
+Verificación (cliente stdio mínimo): `initialize` + `tools/list` + `tools/call` ×4 → todo JSON-RPC
+limpio en stdout; `search_code_entities("z order bring to front")` → `zorder.ts:reorder` +
+`BringToFrontIcon`; `traverse(LayerButtons, upstream)` → `renders-by ShapeFormatToolbar/
+ImageFormatToolbar`; warm start recarga cache sin rebuild.
 
 ## Fase 4 — Eval (1-2 días, opcional — la parte "researcher")
 

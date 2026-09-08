@@ -33,6 +33,23 @@ pip install -r requirements-ts.txt   # 7 packages
 ```
 Python 3.12 is required (`tree-sitter-languages==1.10.2` has no 3.13 wheels).
 
+**Build a graph for a repo:**
+```
+python -m dependency_graph.ts_build_graph --repo /path/to/ts/repo
+```
+
+**MCP server** (`locagent_mcp.py`, stdio) — tools: `search_code_entities`,
+`get_entity`, `traverse`, `get_repo_overview`. It indexes the repo given as its
+`cwd` (or `$LOCAGENT_REPO`) and caches the graph + BM25 index under
+`<repo>/.locagent/` (`$LOCAGENT_CACHE_DIR` to relocate). Cline config:
+```jsonc
+"locagent": {
+  "command": ".../locagent-ts/.venv/Scripts/python.exe",
+  "args": [".../locagent-ts/locagent_mcp.py"],
+  "cwd": "/path/to/the/worktree/you/are/editing"
+}
+```
+
 ---
 
 ## ℹ️ Overview

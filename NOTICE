@@ -24,7 +24,8 @@ New files:
   dependency_graph/queries/typescript.scm   - tree-sitter capture queries (typescript grammar)
   dependency_graph/queries/tsx.scm          - tsx-grammar deltas (JSX)
   plugins/location_tools/utils/compress_file_ts.py - tree-sitter skeletonizer (replaces the libcst one for TS)
-  locagent_mcp.py                           - FastMCP server exposing the retrieval tools
+  locagent_mcp.py                           - FastMCP (stdio) server: search_code_entities,
+                                              get_entity, traverse, get_repo_overview
   requirements-ts.txt                       - minimal runtime dependency set
   NOTICE                                    - this file
 

@@ -183,3 +183,6 @@ sft/
 config.toml
 unsloth_compiled_cache/
 wandb/
+# LocAgent-TS graph/BM25 caches
+.locagent/
+.locagent-cache/
