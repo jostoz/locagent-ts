@@ -38,12 +38,20 @@ from typing import List, Optional, Tuple
 warnings.filterwarnings('ignore')
 logging.getLogger('bm25s').setLevel(logging.WARNING)
 
+# MCP speaks newline-delimited JSON-RPC over stdout. Some deps print to stdout at
+# IMPORT time (e.g. "resource module not available on Windows"), which a strict
+# client like OMP rejects with "Failed to parse JSONL". Redirect stdout to stderr
+# for the whole module load + tool registration; restore it just before
+# mcp.run() hands stdout to the protocol.
+_REAL_STDOUT = sys.stdout
+sys.stdout = sys.stderr
+
 
 @contextlib.contextmanager
 def _protect_stdout():
-    """MCP speaks JSON-RPC over stdout. Anything the graph/index build writes
-    there (bm25s progress, stray prints) would corrupt the stream -- send it to
-    stderr for the duration."""
+    """Route to stderr anything a graph/index build (bm25s, stray prints) writes
+    to stdout while the MCP protocol owns it -- used around lazy work inside tool
+    handlers."""
     saved = sys.stdout
     sys.stdout = sys.stderr
     try:
@@ -401,4 +409,5 @@ def get_repo_overview(max_depth: int = 3) -> str:
 
 
 if __name__ == '__main__':
+    sys.stdout = _REAL_STDOUT  # hand the real stdout to the JSON-RPC transport
     mcp.run(transport='stdio')
