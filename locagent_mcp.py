@@ -217,6 +217,37 @@ def _wrap_lines(code: str, start_line: int) -> str:
     return '\n'.join(f'{str(i + start_line).rjust(w)} | {ln}' for i, ln in enumerate(lines))
 
 
+def _file_outline(g, nid: str, n_lines: int, raw_skeleton: str) -> str:
+    """Compact structural view of a large file: its top-level entities from the
+    graph's `contains` edges, one signature line each. A raw skeleton of a
+    7k-line file is still ~1.4k lines; this is ~60."""
+    rows = []
+    for _, child, ed in g.out_edges(nid, data=True):
+        if ed.get('type') != 'contains':
+            continue
+        cd = g.nodes[child]
+        if cd.get('type') not in (NODE_TYPE_FUNCTION, NODE_TYPE_CLASS):
+            continue
+        nm = child.split(':', 1)[1]
+        if '.' in nm:            # nested -> only top-level here
+            continue
+        sig = next((ln.strip() for ln in (cd.get('skeleton') or '').splitlines()
+                    if ln.strip() and not ln.strip().startswith(('//', '/*', '*'))), nm)
+        rows.append((cd.get('start_line', 0),
+                     f'  L{cd.get("start_line", "?")}-{cd.get("end_line", "?")}  '
+                     f'{sig[:140]}{" [component]" if cd.get("is_component") else ""}'))
+    if not rows:
+        head = '\n'.join(raw_skeleton.splitlines()[:_FILE_SKELETON_MAX_LINES])
+        return (f'{nid}  (file, {n_lines} lines)  [skeleton head]\n```\n{head}\n'
+                f'... (large file, truncated)\n```')
+    rows.sort()
+    shown = [r for _, r in rows[:60]]
+    more = f'\n  ... {len(rows) - 60} more' if len(rows) > 60 else ''
+    return (f'{nid}  (file, {n_lines} lines, {len(rows)} top-level entities)  [outline]\n'
+            f'```\n' + '\n'.join(shown) + more + '\n```\n'
+            f'get_entity("{nid}:<Name>", "skeleton" | "full") for one.')
+
+
 def _rrf(*ranked_lists: List[str], k: int = 60) -> List[str]:
     """Reciprocal-rank fusion of several ranked id lists."""
     score: dict = {}
@@ -313,41 +344,18 @@ def get_entity(entity_id: str = '', mode: str = 'skeleton', id: str = '') -> str
     if ntype == NODE_TYPE_DIRECTORY:
         return f'{nid} is a directory; use get_repo_overview or traverse.'
 
+    n_lines = code.count('\n') + 1
+
+    # FILE nodes: never inline a whole file. Both modes -> a compact raw
+    # skeleton for a small file, else the graph outline of its entities.
+    if ntype == NODE_TYPE_FILE:
+        raw = get_skeleton(code, language=nd.get('language'))
+        if raw.count('\n') + 1 <= _FILE_SKELETON_MAX_LINES:
+            return f'{nid}  (file, {n_lines} lines)  [skeleton]\n```\n{raw}\n```'
+        return _file_outline(g, nid, n_lines, raw)
+
+    # ENTITY nodes
     if mode == 'skeleton':
-        if ntype == NODE_TYPE_FILE:
-            n_lines = code.count('\n') + 1
-            raw = get_skeleton(code, language=nd.get('language'))
-            if raw.count('\n') + 1 <= _FILE_SKELETON_MAX_LINES:
-                return f'{nid}  (file, {n_lines} lines)  [skeleton]\n```\n{raw}\n```'
-            # big file: a raw skeleton of a 9k-line file is still ~1.4k lines.
-            # give the compact structural outline from the graph instead --
-            # top-level entities with line ranges + a hint to drill in.
-            rows = []
-            for _, child, ed in g.out_edges(nid, data=True):
-                if ed.get('type') != 'contains':
-                    continue
-                cd = g.nodes[child]
-                if cd.get('type') not in (NODE_TYPE_FUNCTION, NODE_TYPE_CLASS):
-                    continue
-                nm = child.split(':', 1)[1]
-                if '.' in nm:            # nested -> skip, only top-level here
-                    continue
-                sig = next((ln.strip() for ln in (cd.get('skeleton') or '').splitlines()
-                            if ln.strip() and not ln.strip().startswith(('//', '/*', '*'))), nm)
-                rows.append((cd.get('start_line', 0),
-                             f'  L{cd.get("start_line", "?")}-{cd.get("end_line", "?")}  '
-                             f'{sig[:140]}{" [component]" if cd.get("is_component") else ""}'))
-            if not rows:
-                head = '\n'.join(raw.splitlines()[:_FILE_SKELETON_MAX_LINES])
-                return (f'{nid}  (file, {n_lines} lines)  [skeleton head]\n```\n{head}\n'
-                        f'... (large file, skeleton truncated)\n```')
-            rows.sort()
-            shown = [r for _, r in rows[:60]]
-            more = f'\n  ... {len(rows) - 60} more' if len(rows) > 60 else ''
-            return (f'{nid}  (file, {n_lines} lines, {len(rows)} top-level entities)  [outline]\n'
-                    f'```\n' + '\n'.join(shown) + more + '\n```\n'
-                    f'get_entity("{nid}:<Name>", "skeleton" | "full") for one.')
-        n_lines = code.count('\n') + 1
         if n_lines <= _SKELETON_MIN_LINES:
             numbered = _wrap_lines(code, start_line)
             return (f'{nid}  ({ntype}, {_loc(nid, nd)})  [full: {n_lines} lines, '
@@ -356,12 +364,11 @@ def get_entity(entity_id: str = '', mode: str = 'skeleton', id: str = '') -> str
         return f'{nid}  ({ntype}, {_loc(nid, nd)})  [skeleton]\n```\n{body}\n```'
 
     # full
-    n_lines = code.count('\n') + 1
     if n_lines > _MAX_FULL_LINES:
-        sk = get_skeleton(code, language=nd.get('language') or 'tsx')
-        return (f'{nid} is {n_lines} lines -- too large to inline. Skeleton below; '
-                f'request a nested entity for a specific part.\n```\n{sk}\n```')
-    numbered = _wrap_lines(code, start_line if ntype != NODE_TYPE_FILE else 1)
+        body = nd.get('skeleton') or get_skeleton(code, language=nd.get('language') or 'tsx')
+        return (f'{nid} is {n_lines} lines -- too large to inline. Skeleton (bodies '
+                f'elided); request a nested entity for a specific part.\n```\n{body}\n```')
+    numbered = _wrap_lines(code, start_line)
     return f'{nid}  ({ntype}, {_loc(nid, nd)})  [full]\n```\n{numbered}\n```'
 
 
