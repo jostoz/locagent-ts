@@ -352,7 +352,11 @@ def traverse_graph_structure(G, roots, direction='downstream', hops=2,
 
 def traverse_tree_structure(G, root, direction='downstream', hops=2,
                             node_type_filter: Optional[List[str]] = None,
-                            edge_type_filter: Optional[List[str]] = None):
+                            edge_type_filter: Optional[List[str]] = None,
+                            include_tests: bool = False):
+    # include_tests: by default test-file neighbours are hidden; for
+    # refactor-impact queries ("who calls X") they are exactly what you need,
+    # so callers can opt them back in.
     if hops == -1:
         hops = 20
 
@@ -397,7 +401,7 @@ def traverse_tree_structure(G, root, direction='downstream', hops=2,
                     etype = edges[key]['type']
                     if is_etype_not_valid(etype):
                         continue
-                    if not is_test_file(neighbor):
+                    if include_tests or not is_test_file(neighbor):
                         if (node, etype, neighbor) not in traversed_edges:
                             neigh_ids.append(neighbor)
                             etypes.append(etype)
@@ -415,7 +419,7 @@ def traverse_tree_structure(G, root, direction='downstream', hops=2,
                     etype = edges[key]['type']
                     if is_etype_not_valid(etype):
                         continue
-                    if not is_test_file(neighbor):
+                    if include_tests or not is_test_file(neighbor):
                         if (neighbor, etype, node) not in traversed_edges:
                             neigh_ids.append(neighbor)
                             etypes.append(etype)

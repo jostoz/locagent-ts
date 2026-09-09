@@ -367,7 +367,8 @@ def get_entity(entity_id: str = '', mode: str = 'skeleton', id: str = '') -> str
 
 @mcp.tool()
 def traverse(entity_id: str = '', edge_types: Optional[List[str]] = None,
-             direction: str = 'both', hops: int = 2, id: str = '') -> str:
+             direction: str = 'both', hops: int = 2, id: str = '',
+             include_tests: Optional[bool] = None) -> str:
     """Show the neighbourhood of an entity in the code graph as an indented tree.
 
     Args:
@@ -376,6 +377,14 @@ def traverse(entity_id: str = '', edge_types: Optional[List[str]] = None,
             (default: all).
         direction: "downstream" (this -> others), "upstream" (others -> this) or "both".
         hops: traversal depth, 1-4 (default 2).
+        include_tests: show neighbours in test files. Defaults to True for
+            "upstream" (you want to know which tests use X before a refactor)
+            and False otherwise.
+
+    For refactor impact ("who breaks if I change X's signature") use
+    direction="upstream", edge_types=["invokes","imports"]: `invokes` gives the
+    runtime callers, `imports` also catches dependents whose call sites are not
+    in a named entity (e.g. assertions inside anonymous it()/test callbacks).
     """
     _ensure_loaded()
     g = _STATE['graph']
@@ -393,9 +402,12 @@ def traverse(entity_id: str = '', edge_types: Optional[List[str]] = None,
         bad = [e for e in edge_types if e not in VALID_EDGE_TYPES]
         if bad:
             return f'unknown edge types {bad}; valid: {VALID_EDGE_TYPES}'
+    if include_tests is None:
+        include_tests = direction == 'upstream'
 
     tree = traverse_tree_structure(g, nid, direction=direction, hops=hops,
-                                   edge_type_filter=edge_types)
+                                   edge_type_filter=edge_types,
+                                   include_tests=include_tests)
     if not tree or tree.strip() == nid:
         return f'{nid} has no {"/".join(edge_types) if edge_types else ""} neighbours ' \
                f'in direction {direction} within {hops} hop(s).'
