@@ -94,6 +94,7 @@ CACHE_DIR = Path(os.environ['LOCAGENT_CACHE_DIR']).resolve() \
     if os.environ.get('LOCAGENT_CACHE_DIR') else REPO / '.locagent'
 _CACHE_SCHEMA = 'v1'          # bump to invalidate all caches on a schema change
 _MAX_FULL_LINES = 400         # get_entity(full) cap before it suggests skeleton
+_SKELETON_MIN_LINES = 40      # below this, skeleton saves nothing -> return full
 _MAX_TRAVERSE_CHARS = 6000
 
 _STATE: dict = {}
@@ -282,21 +283,26 @@ def search_code_entities(query: str, max_results: int = 10, scope: str = 'all') 
 
 
 @mcp.tool()
-def get_entity(entity_id: str, mode: str = 'skeleton') -> str:
+def get_entity(entity_id: str = '', mode: str = 'skeleton', id: str = '') -> str:
     """Return the source of one entity by its graph id (as printed by
     search_code_entities, e.g. "src/board/toolbars.tsx:ImageFormatToolbar").
 
     Args:
-        entity_id: the node id (a bare name is resolved if unambiguous).
-        mode: "skeleton" (signatures + JSDoc, bodies elided) or "full".
+        entity_id: the node id (a bare name is resolved if unambiguous). `id` is
+            accepted as an alias.
+        mode: "skeleton" (signatures + JSDoc, bodies elided) or "full". Small
+            entities are returned in full regardless -- eliding saves nothing.
     """
     _ensure_loaded()
     g = _STATE['graph']
-    nid, sugg = _resolve_id(entity_id)
+    target = entity_id or id
+    if not target:
+        return 'provide "entity_id" -- a node id from search_code_entities'
+    nid, sugg = _resolve_id(target)
     if nid is None:
         if sugg:
             return 'ambiguous / not found. did you mean:\n' + '\n'.join(f'  {s}' for s in sugg)
-        return f'no entity {entity_id!r} in this repo'
+        return f'no entity {target!r} in this repo'
 
     nd = g.nodes[nid]
     ntype = nd.get('type')
@@ -309,8 +315,13 @@ def get_entity(entity_id: str, mode: str = 'skeleton') -> str:
     if mode == 'skeleton':
         if ntype == NODE_TYPE_FILE:
             body = get_skeleton(code, language=nd.get('language'))
-        else:
-            body = nd.get('skeleton') or get_skeleton(code, language='tsx')
+            return f'{nid}  ({ntype}, {_loc(nid, nd)})  [skeleton]\n```\n{body}\n```'
+        n_lines = code.count('\n') + 1
+        if n_lines <= _SKELETON_MIN_LINES:
+            numbered = _wrap_lines(code, start_line)
+            return (f'{nid}  ({ntype}, {_loc(nid, nd)})  [full: {n_lines} lines, '
+                    f'skeleton would elide everything]\n```\n{numbered}\n```')
+        body = nd.get('skeleton') or get_skeleton(code, language='tsx')
         return f'{nid}  ({ntype}, {_loc(nid, nd)})  [skeleton]\n```\n{body}\n```'
 
     # full
@@ -324,12 +335,12 @@ def get_entity(entity_id: str, mode: str = 'skeleton') -> str:
 
 
 @mcp.tool()
-def traverse(entity_id: str, edge_types: Optional[List[str]] = None,
-             direction: str = 'both', hops: int = 2) -> str:
+def traverse(entity_id: str = '', edge_types: Optional[List[str]] = None,
+             direction: str = 'both', hops: int = 2, id: str = '') -> str:
     """Show the neighbourhood of an entity in the code graph as an indented tree.
 
     Args:
-        entity_id: node id to start from.
+        entity_id: node id to start from. `id` is accepted as an alias.
         edge_types: subset of ["contains","imports","invokes","inherits","renders"]
             (default: all).
         direction: "downstream" (this -> others), "upstream" (others -> this) or "both".
@@ -337,10 +348,13 @@ def traverse(entity_id: str, edge_types: Optional[List[str]] = None,
     """
     _ensure_loaded()
     g = _STATE['graph']
-    nid, sugg = _resolve_id(entity_id)
+    target = entity_id or id
+    if not target:
+        return 'provide "entity_id" -- a node id from search_code_entities'
+    nid, sugg = _resolve_id(target)
     if nid is None:
         return ('ambiguous / not found. candidates:\n' + '\n'.join(f'  {s}' for s in sugg)) \
-            if sugg else f'no entity {entity_id!r} in this repo'
+            if sugg else f'no entity {target!r} in this repo'
     if direction not in ('downstream', 'upstream', 'both'):
         return 'direction must be downstream | upstream | both'
     hops = max(1, min(hops, 4))
