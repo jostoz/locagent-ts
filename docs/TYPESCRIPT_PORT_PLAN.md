@@ -233,6 +233,45 @@ cliente. Confinado a `LOCAGENT_REPO` (o `cwd`); cache en `LOCAGENT_CACHE_DIR` (o
   `claude mcp add locagent -e LOCAGENT_REPO=<repo> -- <venv python> locagent_mcp.py`.
   Tools namespaced `mcp__locagent__*`. (El mismo `.mcp.json` lo hereda OMP.)
 
+## Piloto informal — Cline + modelo local (2026-09-09)
+
+Primer dato empírico del stack completo: **Cline CLI + `qwen/qwen3.5-9b`** (local,
+LM Studio, 65k ctx) + `locagent` MCP sobre `Documents/miro-clone` @ `origin/main`
+(`Board.tsx` 7.5k líneas). 7 prompts, uno por turno.
+
+**Resultado: 7/7 localizaciones correctas**, todas con tool calls nativos, sin
+basura. Ej.: "z-order de las shapes" → `zorder.ts:reorder` + wrappers por tipo +
+`Board.applyZOrder` + `LayerButtons`; "mapear llamadores de `reorder` antes de
+tocar" → mapa de impacto completo, se detuvo a preguntar la firma nueva;
+"traverse renders desde Board" → árbol de componentes de 4 hops.
+
+**Arnés — hallazgo clave:** OMP volteó a los modelos chicos con su indirección
+`xd://` para tools MCP (el 9b escribía JSON como texto, `write()` a paths,
+loopeaba). Cline las expone directo (`mcp__locagent__*`) → el mismo 9b las usa
+bien. El servidor MCP no cambió. Ver [[harness-matters-mcp-clients]] en memoria.
+
+**Fixes que salieron del piloto** (todos commiteados):
+- `084f4de` — `get_entity`/`traverse` aceptan `id` además de `entity_id`; entidad
+  < 40 líneas → devuelve `full` (elidir no ahorra nada).
+- `420b195` + `51cd828` — `get_entity` sobre un **file** (skeleton **o** full) da
+  el *outline* del grafo (entidades top-level, ~60 líneas), no el skeleton crudo
+  (`Board.tsx`: 1375 → 16 líneas). Un file nunca se inlinea entero.
+- `226e12a` — `traverse` `include_tests` (default True para `upstream`): los tests
+  son lo que más rompe un cambio de firma; el docstring guía a
+  `edge_types=["invokes","imports"]` upstream (`imports` engancha dependientes
+  cuyas call sites no están en una entidad nombrada, p.ej. asserts en callbacks
+  anónimos de `it()`).
+
+**Gap sistémico (v2):** el grafo no modela **binding de props a nivel de sitio
+JSX**. `renders` dice "Board monta AiChatPanel" pero no "`onAction` está bindeada
+a `Board.handleAiAction` en la línea N". El modelo lo suple con grep+read nativo
+(runs 5 y 7). Candidato firme: **arista `renders` con metadata** (línea del tag +
+props bindeadas) en `tsx.scm` + `_add_reference_edges`.
+
+**Config recurrente que muerde:** LM Studio JIT auto-load recarga el modelo al
+default (8192 ctx) si se descarga → todo revienta. Cargar explícito
+(`lms load ... -c 65536`, sin `--ttl`) y desactivar JIT en la GUI.
+
 ## Riesgos / caveats
 
 - **`invokes` es heurístico por nombre** (sin tipos) — más ruidoso en TS. v2 híbrida posible: MCP llama a `tsserver` para `references`, tree-sitter para estructura.
