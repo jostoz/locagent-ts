@@ -95,6 +95,7 @@ CACHE_DIR = Path(os.environ['LOCAGENT_CACHE_DIR']).resolve() \
 _CACHE_SCHEMA = 'v1'          # bump to invalidate all caches on a schema change
 _MAX_FULL_LINES = 400         # get_entity(full) cap before it suggests skeleton
 _SKELETON_MIN_LINES = 40      # below this, skeleton saves nothing -> return full
+_FILE_SKELETON_MAX_LINES = 120  # above this, a file gets a graph outline, not a raw skeleton
 _MAX_TRAVERSE_CHARS = 6000
 
 _STATE: dict = {}
@@ -314,8 +315,38 @@ def get_entity(entity_id: str = '', mode: str = 'skeleton', id: str = '') -> str
 
     if mode == 'skeleton':
         if ntype == NODE_TYPE_FILE:
-            body = get_skeleton(code, language=nd.get('language'))
-            return f'{nid}  ({ntype}, {_loc(nid, nd)})  [skeleton]\n```\n{body}\n```'
+            n_lines = code.count('\n') + 1
+            raw = get_skeleton(code, language=nd.get('language'))
+            if raw.count('\n') + 1 <= _FILE_SKELETON_MAX_LINES:
+                return f'{nid}  (file, {n_lines} lines)  [skeleton]\n```\n{raw}\n```'
+            # big file: a raw skeleton of a 9k-line file is still ~1.4k lines.
+            # give the compact structural outline from the graph instead --
+            # top-level entities with line ranges + a hint to drill in.
+            rows = []
+            for _, child, ed in g.out_edges(nid, data=True):
+                if ed.get('type') != 'contains':
+                    continue
+                cd = g.nodes[child]
+                if cd.get('type') not in (NODE_TYPE_FUNCTION, NODE_TYPE_CLASS):
+                    continue
+                nm = child.split(':', 1)[1]
+                if '.' in nm:            # nested -> skip, only top-level here
+                    continue
+                sig = next((ln.strip() for ln in (cd.get('skeleton') or '').splitlines()
+                            if ln.strip() and not ln.strip().startswith(('//', '/*', '*'))), nm)
+                rows.append((cd.get('start_line', 0),
+                             f'  L{cd.get("start_line", "?")}-{cd.get("end_line", "?")}  '
+                             f'{sig[:140]}{" [component]" if cd.get("is_component") else ""}'))
+            if not rows:
+                head = '\n'.join(raw.splitlines()[:_FILE_SKELETON_MAX_LINES])
+                return (f'{nid}  (file, {n_lines} lines)  [skeleton head]\n```\n{head}\n'
+                        f'... (large file, skeleton truncated)\n```')
+            rows.sort()
+            shown = [r for _, r in rows[:60]]
+            more = f'\n  ... {len(rows) - 60} more' if len(rows) > 60 else ''
+            return (f'{nid}  (file, {n_lines} lines, {len(rows)} top-level entities)  [outline]\n'
+                    f'```\n' + '\n'.join(shown) + more + '\n```\n'
+                    f'get_entity("{nid}:<Name>", "skeleton" | "full") for one.')
         n_lines = code.count('\n') + 1
         if n_lines <= _SKELETON_MIN_LINES:
             numbered = _wrap_lines(code, start_line)
