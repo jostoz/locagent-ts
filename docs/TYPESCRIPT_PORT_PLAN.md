@@ -239,11 +239,26 @@ Primer dato empírico del stack completo: **Cline CLI + `qwen/qwen3.5-9b`** (loc
 LM Studio, 65k ctx) + `locagent` MCP sobre `Documents/miro-clone` @ `origin/main`
 (`Board.tsx` 7.5k líneas). 7 prompts, uno por turno.
 
-**Resultado: 7/7 localizaciones correctas**, todas con tool calls nativos, sin
+**Resultado: 8/8 localizaciones correctas**, todas con tool calls nativos, sin
 basura. Ej.: "z-order de las shapes" → `zorder.ts:reorder` + wrappers por tipo +
 `Board.applyZOrder` + `LayerButtons`; "mapear llamadores de `reorder` antes de
 tocar" → mapa de impacto completo, se detuvo a preguntar la firma nueva;
 "traverse renders desde Board" → árbol de componentes de 4 hops.
+
+**Primer A/B medido (b) vs (c)** — mismo modelo, mismo prompt exacto
+(`traverse upstream renders sobre LayerButtons`):
+
+| | tool calls | contexto | resultado |
+|---|---|---|---|
+| **con `locagent`** | **1** (`traverse`) | **~5k tokens** | `Board → {ShapeFormatToolbar, ImageFormatToolbar} → LayerButtons`, completo |
+| **sin** (solo grep/read de Cline) | **~25** (10+ reads, 10+ searches, 3 comandos PowerShell fallidos) | **~60k tokens** (leyó ~5000 líneas de `Board.tsx` en chunks) | mismo, por el camino largo |
+
+**12× menos contexto, 25× menos tool calls, misma respuesta.** Para un modelo de
+65k de ventana: 5k usados = ~9 turnos de headroom; 60k = a un turno del
+compaction. La eficiencia del grafo *es* la diferencia entre funcionar y
+ahogarse en el archivo de 7.5k líneas — exactamente el problema que motivó el
+proyecto. `tool_calls` y `context_tokens` son las primeras métricas duras para
+la Fase 4 (falta acc@k con ground-truth).
 
 **Arnés — hallazgo clave:** OMP volteó a los modelos chicos con su indirección
 `xd://` para tools MCP (el 9b escribía JSON como texto, `write()` a paths,
