@@ -578,9 +578,14 @@ def build_ts_graph(repo_path: str, fuzzy_search: bool = True, verbose: bool = Fa
             rel_file = os.path.relpath(abs_path, repo_path).replace(os.sep, '/')
             grammar = GRAMMAR_BY_EXT[os.path.splitext(fname)[1]]
             try:
-                with open(abs_path, 'r', encoding='utf-8') as fh:
-                    content = fh.read()
-            except (UnicodeDecodeError, OSError):
+                # bytes + lenient decode, matching analyze_ts_file -- a single
+                # stray non-UTF-8 byte (seen in the wild: a UTF-16 string chunk
+                # pasted into an otherwise-UTF-8 .tsx) must not drop the whole
+                # file from the graph. U+FFFD is 1 byte -> 1 char, so newline
+                # offsets stay aligned with tree-sitter's byte parse.
+                with open(abs_path, 'rb') as fh:
+                    content = fh.read().decode('utf-8', 'replace')
+            except OSError:
                 continue
 
             try:

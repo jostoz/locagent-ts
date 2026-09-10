@@ -92,10 +92,12 @@ REPO = Path(os.environ.get('LOCAGENT_REPO', os.getcwd())).resolve()
 # cache lives in the target repo by default; override for read-only trees.
 CACHE_DIR = Path(os.environ['LOCAGENT_CACHE_DIR']).resolve() \
     if os.environ.get('LOCAGENT_CACHE_DIR') else REPO / '.locagent'
-_CACHE_SCHEMA = 'v4'          # bump to invalidate all caches on a schema change
+_CACHE_SCHEMA = 'v5'          # bump to invalidate all caches on a schema change
                              # v2: invokes/renders edges carry call-site lines + JSX props
                              # v3: renders/invokes disambiguated by import binding
                              # v4: BM25 doc carries a weighted comment/JSDoc field
+                             # v5: files with a stray non-UTF-8 byte are no longer
+                             #     dropped from the graph (Board.tsx was missing)
 _MAX_FULL_LINES = 400         # graph_get(full) cap before it suggests skeleton
 _SKELETON_MIN_LINES = 40      # below this, skeleton saves nothing -> return full
 _FILE_SKELETON_MAX_LINES = 120  # above this, a file gets a graph outline, not a raw skeleton
