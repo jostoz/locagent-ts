@@ -329,6 +329,18 @@ v2 — dinámicos vía mapa de iconos + `App` raíz). Schema de cache → `v3`.
 Cola para v4: componentes referidos solo por valor (`const ICONS = {line:
 LineIcon}; <ICONS[k] />`) no generan `renders` — 10 de los 29 huérfanos son eso.
 
+**Prueba end-to-end v3 (Cline + qwen3.5-9b):** prompt de desambiguación *"¿cuál
+`FrameIcon` renderiza `Board.tsx` y cuál `FramesPanel.tsx`?"*. El grafo respondió
+correcto —`icons.tsx:FrameIcon ← Board @L5589,6123`; `FramesPanel.tsx:FrameIcon ←
+FramesPanel @L91`, sin cruce (con v2 el segundo traía un `renders-by` fantasma de
+`Board`)—, 0 file reads, 10.5k contexto. El 9B **sí** metió un error de lectura:
+corrió `traverse ... hops=2` y aplastó la cadena `FrameIcon ←@L91 FramesPanel
+←@L6901 Board` a "Board renderiza FrameIcon en L6901" (L6901 es el mount de
+`<FramesPanel/>`, no del icono). Mitigación (`<commit>`): docstring de `traverse`
+aclara que `@L<línea>` pertenece a la arista —es una línea del *padre*— y que para
+"qué renderiza directamente a X" se usa `hops=1`; la `.clinerules` agrega "tu
+primera tool call es `search_code_entities`, no `search_files`".
+
 **Re-test v2 (2026-09-09) — dos footguns del arnés/tool, ambos arreglados
 (`64dc9ad`):** corriendo *"which handler is wired to `AiChatPanel`'s `onAction`"*
 con Cline + qwen3.5-9b, el modelo (a) recibió una lista de entidades inútil

@@ -399,7 +399,11 @@ def traverse(entity_id: str = '', edge_types: Optional[List[str]] = None,
         edge_types: subset of ["contains","imports","invokes","inherits","renders"]
             (default: all).
         direction: "downstream" (this -> others), "upstream" (others -> this) or "both".
-        hops: traversal depth, 1-4 (default 2).
+        hops: traversal depth, 1-4 (default 2). For "what directly renders / calls
+            X" use hops=1 -- the answer is the first level. hops>=2 also shows the
+            grandparent; the `@L<line>` on a deeper edge is where THAT parent is
+            mounted/called, NOT where X is. Never attribute a grandparent's line
+            to X.
         include_tests: show neighbours in test files. Defaults to True for
             "upstream" (you want to know which tests use X before a refactor)
             and False otherwise.
@@ -413,7 +417,9 @@ def traverse(entity_id: str = '', edge_types: Optional[List[str]] = None,
     `... invokes ── foo  @L120,204` (called on lines 120 and 204) and
     `... renders ── Toolbar  @L88 {onAction=handleAiAction, onClose=close}`
     (mounted at line 88 with those props wired) -- so you can jump straight to
-    the wiring without grepping the file.
+    the wiring without grepping the file. Each `@L<line>` belongs to the edge it
+    sits on: it is a line in the PARENT (the renderer / caller), pointing at
+    where that parent mounts or calls its child.
     """
     _ensure_loaded()
     g = _STATE['graph']
