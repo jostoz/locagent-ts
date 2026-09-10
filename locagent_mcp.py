@@ -289,15 +289,29 @@ def search_code_entities(query: str, max_results: int = 10, scope: str = 'all') 
     max_results = max(1, min(max_results, 30))
 
     with _protect_stdout():
-        bm = _STATE['bm25'].retrieve(query, k=max_results * 2, search_scope=scope)
+        bm = _STATE['bm25'].retrieve(query, k=max_results * 3, search_scope=scope)
         try:
             fz = fuzzy_retrieve_from_graph_nodes(
-                query, graph=g, search_scope=scope, similarity_top_k=max_results * 2)
+                query, graph=g, search_scope=scope, similarity_top_k=max_results * 3)
         except Exception:  # noqa: BLE001
             fz = []
-    fused = _rrf(bm, fz)[:max_results]
-    if not fused:
+    ranked = _rrf(bm, fz)
+    if not ranked:
         return f'no matches for {query!r}'
+
+    # an entity whose bare name is a query token is almost certainly the target;
+    # BM25 otherwise buries it under tiny same-file helpers ("AiChatPanel" ->
+    # SendIcon/CloseIcon ranked above the AiChatPanel component itself).
+    qtokens = {t.lower().strip('"\'`(){}[]') for t in query.split()}
+
+    def _bare(nid: str) -> str:
+        return nid.split(':')[-1].split('.')[-1].lower() if ':' in nid \
+            else nid.split('/')[-1].lower()
+
+    exact = [n for n in ranked if _bare(n) in qtokens]
+    exact.sort(key=lambda n: not g.nodes[n].get('is_component'))  # components first
+    seen = set(exact)
+    fused = (exact + [n for n in ranked if n not in seen])[:max_results]
 
     searcher = _STATE['searcher']
     out = [f'{len(fused)} entities for {query!r}:']
@@ -419,11 +433,38 @@ def traverse(entity_id: str = '', edge_types: Optional[List[str]] = None,
     if include_tests is None:
         include_tests = direction == 'upstream'
 
+    et_label = '/'.join(edge_types) if edge_types else ''
+
+    # A file id has no invokes/renders/inherits edges -- those attach to its
+    # functions/classes. Expand to the file's top-level entities and traverse
+    # from each, so `traverse("foo.tsx", edge_types=["renders"])` still answers.
+    if g.nodes[nid].get('type') == NODE_TYPE_FILE:
+        kids = [v for _, v, ed in g.out_edges(nid, data=True)
+                if ed.get('type') == 'contains'
+                and g.nodes[v].get('type') in (NODE_TYPE_FUNCTION, NODE_TYPE_CLASS)
+                and '.' not in v.split(':', 1)[1]]
+        blocks = []
+        for k in sorted(kids):
+            t = traverse_tree_structure(g, k, direction=direction, hops=hops,
+                                        edge_type_filter=edge_types,
+                                        include_tests=include_tests)
+            if t and t.strip() != k:
+                blocks.append(t)
+        if not blocks:
+            return (f'{nid} ({len(kids)} entities) has no {et_label} neighbours '
+                    f'in direction {direction} within {hops} hop(s). '
+                    f'(renders/invokes/inherits attach to entities, not files.)')
+        out = '\n\n'.join(blocks)
+        if len(out) > _MAX_TRAVERSE_CHARS:
+            out = out[:_MAX_TRAVERSE_CHARS] + '\n... (truncated; traverse one entity)'
+        return (f'{direction} from the entities of {nid} ({hops} hop(s)):\n'
+                f'```\n{out}\n```')
+
     tree = traverse_tree_structure(g, nid, direction=direction, hops=hops,
                                    edge_type_filter=edge_types,
                                    include_tests=include_tests)
     if not tree or tree.strip() == nid:
-        return f'{nid} has no {"/".join(edge_types) if edge_types else ""} neighbours ' \
+        return f'{nid} has no {et_label} neighbours ' \
                f'in direction {direction} within {hops} hop(s).'
     if len(tree) > _MAX_TRAVERSE_CHARS:
         tree = tree[:_MAX_TRAVERSE_CHARS] + '\n... (truncated; narrow edge_types or hops)'
