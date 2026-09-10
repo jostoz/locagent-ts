@@ -175,6 +175,9 @@ def _resolve_id(raw: str) -> Tuple[Optional[str], List[str]]:
     name ("Class.method"). Returns (nid, suggestions)."""
     g = _STATE['graph']
     raw = raw.strip().strip('"\'`').replace('\\', '/')
+    # tolerate a trailing display tag copied from search output ("…:Foo [component]")
+    while raw.endswith(']') and ' [' in raw:
+        raw = raw[:raw.rindex(' [')].rstrip()
     if raw in g:
         return raw, []
 
@@ -323,8 +326,8 @@ def search_code_entities(query: str, max_results: int = 10, scope: str = 'all') 
             sk = (nd.get('skeleton') or '').splitlines()
             head = next((ln.strip() for ln in sk if ln.strip()
                          and not ln.strip().startswith(('//', '/*', '*'))), '')
-        tag = ' [component]' if nd.get('is_component') else ''
-        out.append(f'- {nid}{tag}  ({nd.get("type")}, {_loc(nid, nd)})'
+        tag = ', component' if nd.get('is_component') else ''
+        out.append(f'- {nid}  ({nd.get("type")}{tag}, {_loc(nid, nd)})'
                    + (f'\n    {head[:160]}' if head else ''))
     out.append('\nNext: get_entity("<id>") for code, traverse("<id>") for neighbours.')
     return '\n'.join(out)

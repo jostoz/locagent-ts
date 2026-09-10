@@ -361,6 +361,50 @@ prompt nombra la herramienta (`a5e6fa1`) o cuando una `.clinerules` lo obliga.
 default (8192 ctx) si se descarga → todo revienta. Cargar explícito
 (`lms load ... -c 65536`, sin `--ttl`) y desactivar JIT en la GUI.
 
+**Setup headless que funcionó (2026-09-09, `qwen/qwen3.5-35b-a3b` MoE, RTX 24GB):**
+```
+lms server start --port 11434            # 1234 da EACCES en Windows (rango reservado)
+lms load qwen/qwen3.5-35b-a3b -c 65536 --gpu max --parallel 1 -y --identifier qwen35moe
+```
+- **`--parallel 1` es obligatorio:** el default (4) parte el KV en 4 slots de ~16k
+  y volvés al muro de contexto. Cline es sesión única.
+- Q4_K_M full-offload a 65536 ctx = **20.56 GiB / 24 GB**, KV f16, sin `n-cpu-moe`.
+  `flash_attn` / KV-quant no los expone el CLI de `lms` y no hacen falta acá.
+- Cline apunta a `http://localhost:11434/v1`, model id `qwen35moe`.
+- **Reasoning:** este Qwen3.5 razona siempre; `/no_think` y
+  `chat_template_kwargs.enable_thinking` no lo paran. Sí lo controla
+  `reasoning_effort` (`none` | `low` | …). Para tool-calling sobre el grafo: **`low`**
+  (un poco de reasoning ayuda a elegir la tool; sin él el modelo chico erraba ahí).
+  LM Studio ya separa el reasoning en `reasoning_content`, no contamina el turno.
+- Persistente (con la app cerrada): `.lmstudio/.internal/http-server-config.json`
+  → `justInTimeModelLoading:false`, `autoStartOnLaunch:true`;
+  `.lmstudio/settings.json` → `defaultContextLength.value:65536`,
+  `developer.jitModelTTL.enabled:false`.
+
+**Piloto headless (2026-09-09) — `qwen3.5-35b-a3b` MoE conduce las 4 tools sin
+Cline** (harness: tools importadas de `locagent_mcp`, expuestas al modelo de LM
+Studio como function-calling OpenAI, sobre `Documents/miro-clone`):
+
+| prompt | tool calls | tiempo | ctx pico | resultado |
+|---|---|---|---|---|
+| wiring de `onAction` de `AiChatPanel` | **2** (`search`→`traverse renders upstream hops=1`) | 6-9 s | ~1.4k | `handleAiAction` @ `Board.tsx:L6077` ✅ (= ground truth) |
+| localización z-order | 6 | 14 s | ~3.5k | `zorder.ts:reorder` + fan-out en `Board.applyZOrder` + `toolbars.tsx:LayerButtons` ✅ |
+
+Grafo headless OK (745 nodos / 1841 aristas). Contexto nunca pasó de ~3.5k de
+65536. Dos footguns que salieron:
+- **`get_entity`/`traverse` rechazaban el id que `search_code_entities` imprimía:**
+  la salida mostraba `…:AiChatPanel [component]` y el modelo lo copiaba entero →
+  `no entity in this repo`. Fix (este commit): `_resolve_id` stripea un `[tag]`
+  final; `search_code_entities` ahora pone `component` dentro del paréntesis
+  (`(function, component, <loc>)`), no pegado al id.
+- Sin recipe explícito en el system prompt el MoE loopea `search_code_entities`
+  con queries reformuladas y no llega a `traverse` en una pregunta natural de
+  wiring — mismo patrón que el 9B; lo resuelve la `.clinerules` retrieval-first.
+
+`reasoning_effort:"low"` en este modelo son ~150-200 tokens de think; con
+`max_tokens` chico (<80) puede quedarse sin lugar para responder. Cline usa
+`max_tokens` amplio, no molesta.
+
 ## Riesgos / caveats
 
 - **`invokes` es heurístico por nombre** (sin tipos) — más ruidoso en TS. v2 híbrida posible: MCP llama a `tsserver` para `references`, tree-sitter para estructura.
