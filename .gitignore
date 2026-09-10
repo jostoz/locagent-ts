@@ -186,3 +186,9 @@ wandb/
 # LocAgent-TS graph/BM25 caches
 .locagent/
 .locagent-cache/
+
+# staged-orchestrator experiment (eval/) -- run outputs + secrets; the corpus,
+# metrics, planner code and cached plans ARE tracked.
+eval/results/
+eval/.env
+orchestrator/.checkpoints/
