@@ -261,6 +261,23 @@ ahogarse en el archivo de 7.5k líneas — exactamente el problema que motivó e
 proyecto. `tool_calls` y `context_tokens` son las primeras métricas duras para
 la Fase 4 (falta acc@k con ground-truth).
 
+**Segundo A/B medido (2026-09-09)** — prompt de wiring natural (no directiva):
+*"which handler is connected to `AiChatPanel`'s `onAction`, and on which line is
+it mounted?"*, Cline + qwen3.5-9b, misma pregunta en 3 condiciones:
+
+| corrida | setup | tool calls | grep/read nativo | contexto |
+|---|---|---|---|---|
+| 1 | MCP, sin rule | 1 `search` + ~11 nativos | 5 read + 6 search | 18.6k |
+| 2 | MCP + `.clinerules`, pre-fix | 3 `search` + `get_entity` + `traverse`→∅ | ~10 `Select-String` | 27.6k |
+| 3 | MCP + `.clinerules` + fixes `64dc9ad` | **1 `search` + 1 `traverse`** | **0** | **7.6k** |
+
+Respuesta correcta en las 3 (`handleAiAction`, L6077). La corrida 3 es el camino
+buscado: `search_code_entities` devuelve el componente #1, `traverse renders
+upstream` da la respuesta en la anotación `@L6077 {onAction=handleAiAction}`. El
+delta 1→3 (18.6k→7.6k, 12 calls→2) no es v2 solo: es v2 + ranking exact-match +
+`traverse` sobre file + la rule que orienta al 9B al grafo. Sin *alguno* de esos
+cuatro, el modelo chico vuelve a grep.
+
 **Arnés — hallazgo clave:** OMP volteó a los modelos chicos con su indirección
 `xd://` para tools MCP (el 9b escribía JSON como texto, `write()` a paths,
 loopeaba). Cline las expone directo (`mcp__locagent__*`) → el mismo 9b las usa
