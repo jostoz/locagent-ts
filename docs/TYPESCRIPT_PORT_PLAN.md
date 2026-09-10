@@ -405,6 +405,29 @@ Grafo headless OK (745 nodos / 1841 aristas). Contexto nunca pasó de ~3.5k de
 `max_tokens` chico (<80) puede quedarse sin lugar para responder. Cline usa
 `max_tokens` amplio, no molesta.
 
+**Validación por el transporte MCP real (Cline CLI 3.0.61 + `qwen35moe`, 2026-09-09)
+— reproduce el piloto headless:**
+
+| prompt | tool calls | grep/read nativo | resultado |
+|---|---|---|---|
+| wiring de `onAction` de `AiChatPanel` | **2** (`search`→`traverse renders upstream hops=1`) | **0** | `handleAiAction` @ `Board.tsx:L6077` ✅ |
+| localización z-order (v1 instructions) | ~10 grafo | ~6 (`read_files`×3, `search_codebase`×1, `run_commands` grep×2) | correcto y exhaustivo, pero viola la hard rule "3+ búsquedas nativas → pará" |
+| localización z-order (tras afilar `instructions=` del server) | 12 grafo | 5 (`read_files`×3, `search_codebase`×2, **0 shell grep**) | correcto; sigue sin usar `traverse invokes upstream` para enumerar wrappers |
+
+**Cierre del paso 1:** el transporte MCP de Cline **funciona** (era la duda tras
+el detour de OMP). En preguntas de wiring acotadas la disciplina grafo-primero es
+limpia (2 calls, 0 nativo). En preguntas amplias de "enumerá todo lo que
+toca X" el MoE 35B-A3B recae a `search`+`read_files` en vez de una sola
+`traverse(X, upstream, invokes)` — afilar `instructions=` del server sacó el
+shell-grep pero no cambió el patrón de fondo. Es el mismo techo que el doc ya
+anota para el 9B; la respuesta igual sale correcta. Empujar más = tool
+`find_callers(entity)` con nombre inequívoco, o modelo más grande.
+
+Config extra que muerde: la GUI de LM Studio abierta puede descargar el modelo
+cargado por CLI a mitad de sesión (`unloadPreviousModelOnSelect`) → Cline corta
+con `Engine protocol predict request failed: fetch failed`. Recargar y no tocar
+la GUI, o cargar todo desde la GUI.
+
 ## Riesgos / caveats
 
 - **`invokes` es heurístico por nombre** (sin tipos) — más ruidoso en TS. v2 híbrida posible: MCP llama a `tsserver` para `references`, tree-sitter para estructura.

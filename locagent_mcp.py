@@ -271,7 +271,14 @@ mcp = FastMCP(
         'search_code_entities to find relevant functions/classes/components, '
         'then get_entity for the exact code (skeleton first) and traverse to '
         'follow imports / calls / inheritance / JSX renders. Never read a whole '
-        'large file -- request the entity.'
+        'large file -- request the entity.\n'
+        'To ENUMERATE every place that calls / wraps / mounts an entity X '
+        '(e.g. "all wrappers of reorder", "who calls applyZOrder", "everything '
+        'that renders LayerButtons"), call traverse(X, direction="upstream", '
+        'edge_types=["invokes"] or ["renders"]) -- one call returns the complete '
+        'list with call-site lines. Do NOT grep for definitions or reword '
+        'search_code_entities queries to build that list by hand; the graph '
+        'already has every edge.'
     ),
 )
 
@@ -410,6 +417,12 @@ def traverse(entity_id: str = '', edge_types: Optional[List[str]] = None,
         include_tests: show neighbours in test files. Defaults to True for
             "upstream" (you want to know which tests use X before a refactor)
             and False otherwise.
+
+    To list EVERY caller / wrapper / mount site of X in one call, use
+    direction="upstream" with edge_types=["invokes"] (callers and wrappers) or
+    ["renders"] (JSX mount sites). The result is the complete set with
+    `@L<line>` call sites -- do not fall back to grep or to re-worded
+    search_code_entities queries to assemble that list by hand.
 
     For refactor impact ("who breaks if I change X's signature") use
     direction="upstream", edge_types=["invokes","imports"]: `invokes` gives the
