@@ -301,6 +301,22 @@ cadena `onLayer` con líneas en 1 llamada, sin fallback a grep.
 Cola para v3: `renders` sigue siendo name-match (colisión `FrameIcon` en 2
 archivos); resolución por import-scope como en `invokes`.
 
+**Re-test v2 (2026-09-09) — dos footguns del arnés/tool, ambos arreglados
+(`64dc9ad`):** corriendo *"which handler is wired to `AiChatPanel`'s `onAction`"*
+con Cline + qwen3.5-9b, el modelo (a) recibió una lista de entidades inútil
+—`search_code_entities("AiChatPanel", max=5)` rankeaba `SendIcon`/`nextMessageId`
+por encima del componente `AiChatPanel`, que caía fuera del top 5— y (b) hizo
+`traverse` sobre el **nodo file** (`AiChatPanel.tsx`), que devolvía *"no renders
+neighbours"* porque `renders`/`invokes`/`inherits` cuelgan de entidades, no de
+files. Sin respuesta del grafo → fallback a `Select-String` (10+ comandos).
+Fixes: exact-name-match sube al top en `search_code_entities` (componentes
+primero); `traverse` sobre un file expande a sus entidades top-level y recorre
+cada una. **Lección para el paper:** el valor del grafo depende de que (1) el
+retrieval devuelva el id correcto y (2) las tool signatures no tengan bordes que
+manden al modelo chico de vuelta a grep. Sin la rule de Cline retrieval-first el
+9B no llama a `traverse` en una pregunta natural de wiring —lo hace cuando el
+prompt nombra la herramienta (`a5e6fa1`) o cuando una `.clinerules` lo obliga.
+
 **Config recurrente que muerde:** LM Studio JIT auto-load recarga el modelo al
 default (8192 ctx) si se descarga → todo revienta. Cargar explícito
 (`lms load ... -c 65536`, sin `--ttl`) y desactivar JIT en la GUI.
