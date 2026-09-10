@@ -9,10 +9,10 @@ files (path / mtime / size) changed. A repo it cannot write to just runs without
 a cache.
 
 Tools:
-  search_code_entities(query, max_results=10, scope="all")
-  get_entity(entity_id, mode="skeleton"|"full")
-  traverse(entity_id, edge_types=None, direction="both", hops=2)
-  get_repo_overview(max_depth=3)
+  graph_search(query, max_results=10, scope="all")
+  graph_get(entity_id, mode="skeleton"|"full")
+  graph_traverse(entity_id, edge_types=None, direction="both", hops=2)
+  graph_map(max_depth=3)
 
 Wire into Cline (`~/.cline/data/settings/cline_mcp_settings.json`):
   "locagent": {
@@ -95,7 +95,7 @@ CACHE_DIR = Path(os.environ['LOCAGENT_CACHE_DIR']).resolve() \
 _CACHE_SCHEMA = 'v3'          # bump to invalidate all caches on a schema change
                              # v2: invokes/renders edges carry call-site lines + JSX props
                              # v3: renders/invokes disambiguated by import binding
-_MAX_FULL_LINES = 400         # get_entity(full) cap before it suggests skeleton
+_MAX_FULL_LINES = 400         # graph_get(full) cap before it suggests skeleton
 _SKELETON_MIN_LINES = 40      # below this, skeleton saves nothing -> return full
 _FILE_SKELETON_MAX_LINES = 120  # above this, a file gets a graph outline, not a raw skeleton
 _MAX_TRAVERSE_CHARS = 6000
@@ -250,7 +250,7 @@ def _file_outline(g, nid: str, n_lines: int, raw_skeleton: str) -> str:
     more = f'\n  ... {len(rows) - 60} more' if len(rows) > 60 else ''
     return (f'{nid}  (file, {n_lines} lines, {len(rows)} top-level entities)  [outline]\n'
             f'```\n' + '\n'.join(shown) + more + '\n```\n'
-            f'get_entity("{nid}:<Name>", "skeleton" | "full") for one.')
+            f'graph_get("{nid}:<Name>", "skeleton" | "full") for one.')
 
 
 def _rrf(*ranked_lists: List[str], k: int = 60) -> List[str]:
@@ -267,24 +267,29 @@ def _rrf(*ranked_lists: List[str], k: int = 60) -> List[str]:
 mcp = FastMCP(
     'locagent-ts',
     instructions=(
-        'Graph-guided code localization for this repository. Start with '
-        'search_code_entities to find relevant functions/classes/components, '
-        'then get_entity for the exact code (skeleton first) and traverse to '
-        'follow imports / calls / inheritance / JSX renders. Never read a whole '
-        'large file -- request the entity.\n'
+        'Graph-guided code localization for this repository. For ANY question of '
+        'the form where is X / which calls or renders X / who uses X / what is '
+        'prop P wired to / what breaks if X changes: use ONLY these graph tools. '
+        'Do NOT use the native search_codebase / search_files / read_file / grep '
+        'tools for such a question -- they are the wrong instrument and waste the '
+        'context window; graph_search + graph_traverse already hold the answer.\n'
+        'Order: graph_search (plain-language) to get the entity id -> graph_get '
+        '(skeleton first) for its code -> graph_traverse to follow imports / '
+        'calls / inheritance / JSX renders. Never read a whole large file.\n'
         'To ENUMERATE every place that calls / wraps / mounts an entity X '
         '(e.g. "all wrappers of reorder", "who calls applyZOrder", "everything '
-        'that renders LayerButtons"), call traverse(X, direction="upstream", '
-        'edge_types=["invokes"] or ["renders"]) -- one call returns the complete '
-        'list with call-site lines. Do NOT grep for definitions or reword '
-        'search_code_entities queries to build that list by hand; the graph '
-        'already has every edge.'
+        'that renders LayerButtons"), ONE call answers it: graph_traverse(X, '
+        'direction="upstream", edge_types=["invokes"] or ["renders"]) -- it '
+        'returns the complete list with call-site lines. Never assemble that '
+        'list by hand with grep or reworded graph_search queries. Once that '
+        'traverse has returned, the list IS complete -- synthesise your answer '
+        'from it and stop; do not keep searching for more.'
     ),
 )
 
 
 @mcp.tool()
-def search_code_entities(query: str, max_results: int = 10, scope: str = 'all') -> str:
+def graph_search(query: str, max_results: int = 10, scope: str = 'all') -> str:
     """Find code entities (functions, classes, React components, files) relevant
     to a natural-language query, ranked by a fusion of BM25 and fuzzy name match.
 
@@ -336,14 +341,14 @@ def search_code_entities(query: str, max_results: int = 10, scope: str = 'all') 
         tag = ', component' if nd.get('is_component') else ''
         out.append(f'- {nid}  ({nd.get("type")}{tag}, {_loc(nid, nd)})'
                    + (f'\n    {head[:160]}' if head else ''))
-    out.append('\nNext: get_entity("<id>") for code, traverse("<id>") for neighbours.')
+    out.append('\nNext: graph_get("<id>") for code, graph_traverse("<id>") for neighbours.')
     return '\n'.join(out)
 
 
 @mcp.tool()
-def get_entity(entity_id: str = '', mode: str = 'skeleton', id: str = '') -> str:
+def graph_get(entity_id: str = '', mode: str = 'skeleton', id: str = '') -> str:
     """Return the source of one entity by its graph id (as printed by
-    search_code_entities, e.g. "src/board/toolbars.tsx:ImageFormatToolbar").
+    graph_search, e.g. "src/board/toolbars.tsx:ImageFormatToolbar").
 
     Args:
         entity_id: the node id (a bare name is resolved if unambiguous). `id` is
@@ -355,7 +360,7 @@ def get_entity(entity_id: str = '', mode: str = 'skeleton', id: str = '') -> str
     g = _STATE['graph']
     target = entity_id or id
     if not target:
-        return 'provide "entity_id" -- a node id from search_code_entities'
+        return 'provide "entity_id" -- a node id from graph_search'
     nid, sugg = _resolve_id(target)
     if nid is None:
         if sugg:
@@ -368,7 +373,7 @@ def get_entity(entity_id: str = '', mode: str = 'skeleton', id: str = '') -> str
     start_line = nd.get('start_line', 1)
 
     if ntype == NODE_TYPE_DIRECTORY:
-        return f'{nid} is a directory; use get_repo_overview or traverse.'
+        return f'{nid} is a directory; use graph_map or graph_traverse.'
 
     n_lines = code.count('\n') + 1
 
@@ -399,9 +404,9 @@ def get_entity(entity_id: str = '', mode: str = 'skeleton', id: str = '') -> str
 
 
 @mcp.tool()
-def traverse(entity_id: str = '', edge_types: Optional[List[str]] = None,
-             direction: str = 'both', hops: int = 2, id: str = '',
-             include_tests: Optional[bool] = None) -> str:
+def graph_traverse(entity_id: str = '', edge_types: Optional[List[str]] = None,
+                   direction: str = 'both', hops: int = 2, id: str = '',
+                   include_tests: Optional[bool] = None) -> str:
     """Show the neighbourhood of an entity in the code graph as an indented tree.
 
     Args:
@@ -422,7 +427,7 @@ def traverse(entity_id: str = '', edge_types: Optional[List[str]] = None,
     direction="upstream" with edge_types=["invokes"] (callers and wrappers) or
     ["renders"] (JSX mount sites). The result is the complete set with
     `@L<line>` call sites -- do not fall back to grep or to re-worded
-    search_code_entities queries to assemble that list by hand.
+    graph_search queries to assemble that list by hand.
 
     For refactor impact ("who breaks if I change X's signature") use
     direction="upstream", edge_types=["invokes","imports"]: `invokes` gives the
@@ -441,7 +446,7 @@ def traverse(entity_id: str = '', edge_types: Optional[List[str]] = None,
     g = _STATE['graph']
     target = entity_id or id
     if not target:
-        return 'provide "entity_id" -- a node id from search_code_entities'
+        return 'provide "entity_id" -- a node id from graph_search'
     nid, sugg = _resolve_id(target)
     if nid is None:
         return ('ambiguous / not found. candidates:\n' + '\n'.join(f'  {s}' for s in sugg)) \
@@ -459,8 +464,8 @@ def traverse(entity_id: str = '', edge_types: Optional[List[str]] = None,
     et_label = '/'.join(edge_types) if edge_types else ''
 
     # A file id has no invokes/renders/inherits edges -- those attach to its
-    # functions/classes. Expand to the file's top-level entities and traverse
-    # from each, so `traverse("foo.tsx", edge_types=["renders"])` still answers.
+    # functions/classes. Expand to the file's top-level entities and graph_traverse
+    # from each, so `graph_traverse("foo.tsx", edge_types=["renders"])` still answers.
     if g.nodes[nid].get('type') == NODE_TYPE_FILE:
         kids = [v for _, v, ed in g.out_edges(nid, data=True)
                 if ed.get('type') == 'contains'
@@ -479,7 +484,7 @@ def traverse(entity_id: str = '', edge_types: Optional[List[str]] = None,
                     f'(renders/invokes/inherits attach to entities, not files.)')
         out = '\n\n'.join(blocks)
         if len(out) > _MAX_TRAVERSE_CHARS:
-            out = out[:_MAX_TRAVERSE_CHARS] + '\n... (truncated; traverse one entity)'
+            out = out[:_MAX_TRAVERSE_CHARS] + '\n... (truncated; graph_traverse one entity)'
         return (f'{direction} from the entities of {nid} ({hops} hop(s)):\n'
                 f'```\n{out}\n```')
 
@@ -495,7 +500,7 @@ def traverse(entity_id: str = '', edge_types: Optional[List[str]] = None,
 
 
 @mcp.tool()
-def get_repo_overview(max_depth: int = 3) -> str:
+def graph_map(max_depth: int = 3) -> str:
     """A directory tree of the repo's source files plus entity counts. Use this
     first to learn the layout."""
     _ensure_loaded()
