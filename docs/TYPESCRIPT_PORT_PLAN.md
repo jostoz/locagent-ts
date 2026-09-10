@@ -528,6 +528,26 @@ expresadas como chequeo de valor en runtime, el hand-off a grep es *esperado, no
 un fallo* — usar el grafo para hallar el clúster, grep para cerrarlo. (Falta
 espejar esa línea en `.clinerules/graph-first-localization.md` de miro-clone.)
 
+**Validación del nivel 1 (2026-09-10):** rebuild v4 del cache real
+(`.locagent-cache/miro-clone/`, no el `.locagent/` del repo target — ese está
+stale y sin uso). Consulta directa al índice v4: `"note with color undefined is
+a text box"` → top hits `useStickyNotes.updateNoteSize` / `TextFormatToolbar` /
+`updateNoteText` / `addText` — el clúster exacto que Sonnet tuvo que grepear;
+pre-v4 esas queries no matcheaban nada útil. Sin regresión en q1-q5 vía Cline+9b
+(0 llamadas nativas, `graph_search` primero siempre): los 3 misses del scorer son
+(q1) drift de ground-truth — el grafo ahora dice `AiChatPanel` @ Board.tsx:6078,
+el ground truth decía 6077; miro-clone se movió una línea porque Sonnet lo editó;
+(q5) el modelo eligió `hops=2` y reportó las líneas del abuelo en Board.tsx en
+vez de 189/304 en toolbars.tsx — caveat conocido de hops≥2, varianza de corrida;
+(q3) respuesta correcta, sólo no nombró `applyZOrder`. qC1 (convención) salió
+correcta pero el 9b hizo 7 reads nativos para extraer el literal `color ===
+undefined` tras aterrizar el clúster — es el flujo que `instructions=` prescribe;
+v4 hace hallable el clúster, no hace que un 9b deje de sobre-leer.
+
+**Pendiente antes de Fase 4:** los ground truths de miro-clone (líneas) driftearon
+desde que Sonnet editó el repo — re-fijarlos contra `HEAD` actual antes de que el
+acc@k sea confiable.
+
 ## Riesgos / caveats
 
 - **`invokes` es heurístico por nombre** (sin tipos) — más ruidoso en TS. v2 híbrida posible: MCP llama a `tsserver` para `references` (vía `solidlsp` de Serena), tree-sitter para estructura. Ver sección "Serena" arriba.
