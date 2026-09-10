@@ -457,9 +457,44 @@ previo (9B 4/5 ↔ 35B 4/5) era ruido de context chico. El 9B queda como pick:
 Lección: el nombre de la tool le pesa más al modelo chico que el docstring, y la
 ventana de contexto tiene que ser la real (65k) para medir cualquier otra cosa.
 
+## Serena (github.com/oraios/serena) — qué aporta y qué no (2026-09-10)
+
+Serena = MCP server LSP-backed (símbolo por símbolo): `find_symbol`,
+`find_referencing_symbols`, `get_symbols_overview`, `search_for_pattern`, +
+edición symbol-level. MIT. Ya se listó en la sección "Contexto" como lo que NO
+somos; estas son las vías concretas en las que igual sirve:
+
+1. **`solidlsp` como la pieza del v2 híbrido.** Es el wrapper (fork de
+   `multilspy`) sobre ~15 language servers con API async uniforme; resuelve lo
+   doloroso: arranque del server, handshake de init, esperar indexado, `file://`
+   URIs, encoding UTF-16 de posiciones. Uso: en `graph_traverse` upstream con
+   `edge_types=["invokes"]`, llamar `textDocument/references` de
+   `typescript-language-server` y mergear con el name-match heurístico → refs con
+   tipos sin reimplementar el cliente LSP. MIT → va en Apache-2.0 con atribución
+   en `NOTICE`. Costo: dependencia que spawnea `tsserver` (Node) + su ciclo de
+   vida en Windows; va contra "artefacto que controlo".
+2. **Baseline para la Fase 4.** Serena es el control natural: tool MCP de la
+   misma categoría, sin grafo precomputado. Correr `9b + Serena` vs
+   `9b + locagent-ts` sobre los mismos prompts es el dato que falta — ¿el grafo
+   bespoke le gana a un LSP para un modelo local? Encaja en la condición (d) que
+   ya estaba prevista arriba.
+3. **Referencia de diseño**: su esquema de symbol-id (name-path `Class/method`),
+   el manejo del lifecycle del LSP, la forma de `get_symbols_overview`.
+
+**No reemplaza:** `graph_traverse` multi-hop en una llamada (Serena es N
+round-trips), BM25 difuso en lenguaje natural (Serena: regex + name-path), las
+aristas `renders` con prop-binding JSX (`@L6077 {onAction=handleAiAction}` —
+LSP no da wiring de props), arranque ~0.5s desde pickle (tsserver: 10-60s hasta
+listo), y el ser un solo artefacto agnóstico al lenguaje.
+
+**Decisión:** usar como baseline en Fase 4 (barato, alto valor). Robar
+`solidlsp` para el modo híbrido **solo si** el eval con ground-truth muestra que
+el name-match de `invokes` es el cuello de botella real. No adoptar como
+reemplazo.
+
 ## Riesgos / caveats
 
-- **`invokes` es heurístico por nombre** (sin tipos) — más ruidoso en TS. v2 híbrida posible: MCP llama a `tsserver` para `references`, tree-sitter para estructura.
+- **`invokes` es heurístico por nombre** (sin tipos) — más ruidoso en TS. v2 híbrida posible: MCP llama a `tsserver` para `references` (vía `solidlsp` de Serena), tree-sitter para estructura. Ver sección "Serena" arriba.
 - **Prompts de LocAgent** (`util/prompts/*.j2`) mencionan idioms Python → edición ligera.
 - **Repo research, no librería mantenida** → asperezas de setup.
 - **Barrels/re-exports y monorepos**: cola larga más allá del v1.
