@@ -23,6 +23,31 @@ def is_test_file(nid):
     return any([word.startswith('test') for word in word_list])
 
 
+def _edge_annot(ed: dict) -> str:
+    """Compact call-site annotation for an edge, appended after the neighbour in
+    the traverse tree. `renders` -> `  @L<lines> {prop=expr, ...}`;
+    `invokes` -> `  @L<lines>`. Empty for edges without site metadata (v1 graphs,
+    contains / imports / inherits)."""
+    t = ed.get('type')
+    if t == 'renders':
+        parts = []
+        lines = ed.get('jsx_lines') or []
+        if lines:
+            parts.append('@L' + ','.join(str(n) for n in lines[:5]))
+        props: dict = {}
+        for site in (ed.get('sites') or []):
+            props.update(site.get('props') or {})
+        if props:
+            shown = ', '.join(f'{k}={v}' for k, v in list(props.items())[:6])
+            parts.append('{' + shown + '}')
+        return ('  ' + ' '.join(parts)) if parts else ''
+    if t == 'invokes':
+        lines = ed.get('call_lines') or []
+        if lines:
+            return '  @L' + ','.join(str(n) for n in lines[:5])
+    return ''
+
+
 def wrap_code_snippet(code_snippet, start_line, end_line):
     lines = code_snippet.split("\n")
     max_line_number = start_line + len(lines) - 1
@@ -364,7 +389,7 @@ def traverse_tree_structure(G, root, direction='downstream', hops=2,
     traversed_nodes = set()  # ignore all the traversed edges
     traversed_edges = set()  # ignore all the traversed nodes
 
-    def traverse(node, prefix, is_last, level, edge_type, edirection):
+    def traverse(node, prefix, is_last, level, edge_type, edirection, edge_annot=''):
         if level > hops:
             return
 
@@ -375,14 +400,14 @@ def traverse_tree_structure(G, root, direction='downstream', hops=2,
         else:
             connector = '└── ' if is_last else '├── '
             connector += f"{edge_type} ── "
-            rtn_str.append(f"{prefix}{connector}{node}")
+            rtn_str.append(f"{prefix}{connector}{node}{edge_annot}")
             new_prefix = prefix + (' ' if is_last else '│') + ' ' * (len(connector) - 1)
 
         if node in traversed_nodes:
             return
         traversed_nodes.add(node)
 
-        neigh_ids, etypes, edirs = [], [], []
+        neigh_ids, etypes, edirs, eannots = [], [], [], []
 
         def is_ntype_not_valid(_ntype):
             return node_type_filter is not None and _ntype not in node_type_filter
@@ -406,6 +431,7 @@ def traverse_tree_structure(G, root, direction='downstream', hops=2,
                             neigh_ids.append(neighbor)
                             etypes.append(etype)
                             edirs.append('downstream')
+                            eannots.append(_edge_annot(edges[key]))
                             traversed_edges.add((node, etype, neighbor))
 
         if 'upstream' == edirection or (node == root and direction == 'both'):
@@ -424,13 +450,15 @@ def traverse_tree_structure(G, root, direction='downstream', hops=2,
                             neigh_ids.append(neighbor)
                             etypes.append(etype)
                             edirs.append('upstream')
+                            eannots.append(_edge_annot(edges[key]))
                             traversed_edges.add((neighbor, etype, node))
 
-        for i, (neigh_id, etype, edir) in enumerate(zip(neigh_ids, etypes, edirs)):
+        for i, (neigh_id, etype, edir, eannot) in enumerate(
+                zip(neigh_ids, etypes, edirs, eannots)):
             is_last_child = (i == len(neigh_ids) - 1)
             if edir == 'upstream':
                 etype += '-by'
-            traverse(neigh_id, new_prefix, is_last_child, level + 1, etype, edir)
+            traverse(neigh_id, new_prefix, is_last_child, level + 1, etype, edir, eannot)
 
     traverse(root, '', False, 0, None, None)
     return "\n".join(rtn_str)

@@ -92,7 +92,8 @@ REPO = Path(os.environ.get('LOCAGENT_REPO', os.getcwd())).resolve()
 # cache lives in the target repo by default; override for read-only trees.
 CACHE_DIR = Path(os.environ['LOCAGENT_CACHE_DIR']).resolve() \
     if os.environ.get('LOCAGENT_CACHE_DIR') else REPO / '.locagent'
-_CACHE_SCHEMA = 'v1'          # bump to invalidate all caches on a schema change
+_CACHE_SCHEMA = 'v2'          # bump to invalidate all caches on a schema change
+                             # v2: invokes/renders edges carry call-site lines + JSX props
 _MAX_FULL_LINES = 400         # get_entity(full) cap before it suggests skeleton
 _SKELETON_MIN_LINES = 40      # below this, skeleton saves nothing -> return full
 _FILE_SKELETON_MAX_LINES = 120  # above this, a file gets a graph outline, not a raw skeleton
@@ -392,6 +393,12 @@ def traverse(entity_id: str = '', edge_types: Optional[List[str]] = None,
     direction="upstream", edge_types=["invokes","imports"]: `invokes` gives the
     runtime callers, `imports` also catches dependents whose call sites are not
     in a named entity (e.g. assertions inside anonymous it()/test callbacks).
+
+    `invokes` and `renders` edges are annotated with the call site:
+    `... invokes ── foo  @L120,204` (called on lines 120 and 204) and
+    `... renders ── Toolbar  @L88 {onAction=handleAiAction, onClose=close}`
+    (mounted at line 88 with those props wired) -- so you can jump straight to
+    the wiring without grepping the file.
     """
     _ensure_loaded()
     g = _STATE['graph']

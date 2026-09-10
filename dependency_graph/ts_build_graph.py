@@ -8,6 +8,13 @@ scheme (``dir`` / ``relpath`` / ``relpath:Dotted.Name``), same node types
 ``renders`` (a component rendering another component through a JSX tag -- the UI
 analogue of ``invokes``).
 
+``invokes`` and ``renders`` edges also carry the call site: ``call_lines``
+(list[int]) on ``invokes``; ``jsx_lines`` (list[int]) and ``sites``
+(list of ``{line, props}`` where ``props`` is prop-name -> bound-expression
+source, e.g. ``onAction`` -> ``handleAiAction``) on ``renders``. This closes the
+v1 gap where the graph knew A renders B but not where, or which handlers were
+wired to it.
+
 Everything downstream of the graph (traverse_graph, BM25, the MCP tools) is
 language-agnostic and consumes this graph unchanged.
 
@@ -270,6 +277,75 @@ def _subtree_has_jsx(inner) -> bool:
     return False
 
 
+# JSX attribute values worth recording on a `renders` edge: expression bindings
+# (event handlers, data, refs). String / numeric / style literals carry no wiring.
+_JSX_WIRING_VALUE_TYPES = frozenset({
+    'identifier', 'member_expression', 'call_expression',
+    'arrow_function', 'function',
+})
+_JSX_PROP_MAX = 80        # truncate one bound expression's source text
+_JSX_PROPS_PER_SITE = 12  # cap props recorded per JSX tag
+
+
+def _jsx_tag_name(el, data: bytes) -> Optional[str]:
+    """Tag name of a jsx_opening_element / jsx_self_closing_element. For
+    ``<Foo.Bar />`` returns ``Bar`` (matched name-only, like the call heuristic)."""
+    nm = el.child_by_field_name('name')
+    if nm is None:
+        return None
+    if nm.type == 'member_expression':
+        prop = nm.child_by_field_name('property')
+        return _node_text(prop, data) if prop is not None else None
+    if nm.type in ('identifier', 'property_identifier'):
+        return _node_text(nm, data)
+    return None
+
+
+def _collapse_expr(node, data: bytes) -> str:
+    """One-line summary of a bound JSX expression. An inline arrow/function is
+    reduced to its parameter list + ``=> …`` (the body is noise for a wiring
+    map); a bare reference / member / call is passed through, whitespace-collapsed
+    and length-capped."""
+    if node.type == 'arrow_function':
+        arrow = next((c for c in node.children if c.type == '=>'), None)
+        if arrow is not None:
+            head = data[node.start_byte:arrow.end_byte].decode('utf-8', 'replace')
+            return ' '.join(head.split()) + ' …'
+    if node.type == 'function':
+        body = _first_body(node)
+        if body is not None:
+            head = data[node.start_byte:body.start_byte].decode('utf-8', 'replace')
+            return ' '.join(head.split()) + ' {…}'
+    txt = ' '.join(_node_text(node, data).split())
+    return txt[:_JSX_PROP_MAX] + ('…' if len(txt) > _JSX_PROP_MAX else '')
+
+
+def _jsx_wiring_props(el, data: bytes) -> Dict[str, str]:
+    """prop name -> collapsed source of its bound expression, for
+    expression-valued attributes only (``onSave={handleSave}``, ``data={rows}``);
+    string / numeric / element literals and ``{...spread}`` are skipped."""
+    out: Dict[str, str] = {}
+    for ch in el.children:
+        if ch.type != 'jsx_attribute':
+            continue
+        kids = ch.children
+        if not kids or kids[0].type != 'property_identifier':
+            continue
+        if len(kids) < 3 or kids[1].type != '=':
+            continue                       # boolean shorthand -> no wiring
+        val = kids[2]
+        if val.type != 'jsx_expression':
+            continue                       # string / element literal
+        inner = next((c for c in val.children
+                      if c.type not in ('{', '}', 'comment')), None)
+        if inner is None or inner.type not in _JSX_WIRING_VALUE_TYPES:
+            continue
+        out[_node_text(kids[0], data)] = _collapse_expr(inner, data)
+        if len(out) >= _JSX_PROPS_PER_SITE:
+            break
+    return out
+
+
 # ────────────────────────────  per-file analysis  ───────────────────────────
 
 def analyze_ts_file(abs_path: str, grammar: str) -> Tuple[List[dict], List[dict]]:
@@ -277,7 +353,8 @@ def analyze_ts_file(abs_path: str, grammar: str) -> Tuple[List[dict], List[dict]
 
     ``entities`` -- list of dicts: ``name`` (dotted), ``type``, ``code``,
     ``start_line``, ``end_line``, ``parent_type``, ``skeleton``, ``is_component``,
-    ``calls`` (list[str]), ``renders`` (list[str]), ``heritage`` (list[str]).
+    ``calls`` (list[(name, line)]), ``renders`` (list[{name, line, props}]),
+    ``heritage`` (list[str]).
 
     ``imports`` -- list of dicts: ``source`` (raw specifier), ``names``
     (list[str]; ``'*'`` for namespace/side-effect/re-export-all), ``kind``
@@ -301,7 +378,7 @@ def analyze_ts_file(abs_path: str, grammar: str) -> Tuple[List[dict], List[dict]
             def_nodes.append((node, _DEF_KIND[cap]))
         elif cap == 'call.name':
             call_caps.append(node)
-        elif cap == 'jsx.name':
+        elif cap == 'jsx.element':
             jsx_caps.append(node)
         elif cap == 'heritage.name':
             heritage_caps.append(node)
@@ -390,15 +467,19 @@ def analyze_ts_file(abs_path: str, grammar: str) -> Tuple[List[dict], List[dict]
             continue
         ent = owner_entity(cnode)
         if ent is not None and nm != ent['name'].split('.')[-1]:
-            ent['calls'].append(nm)
+            ent['calls'].append((nm, cnode.start_point[0] + 1))
 
-    for jnode in jsx_caps:
-        nm = _node_text(jnode, data)
-        if not _is_pascal_case(nm):
+    for el in jsx_caps:
+        comp = _jsx_tag_name(el, data)
+        if not comp or not _is_pascal_case(comp):
             continue
-        ent = owner_entity(jnode)
+        ent = owner_entity(el)
         if ent is not None:
-            ent['renders'].append(nm)
+            ent['renders'].append({
+                'name': comp,
+                'line': el.start_point[0] + 1,
+                'props': _jsx_wiring_props(el, data),
+            })
 
     for hnode in heritage_caps:
         # heritage.name sits inside class_heritage -> class_declaration
@@ -617,16 +698,29 @@ def _add_reference_edges(graph, file_imports, fuzzy_search=True, verbose=False):
         if ntype not in (NODE_TYPE_CLASS, NODE_TYPE_FUNCTION):
             continue
 
-        for callee_name in set(attrs.get('_calls', [])):
+        calls_by_name: Dict[str, List[int]] = defaultdict(list)
+        for nm, ln in attrs.get('_calls', []):
+            calls_by_name[nm].append(ln)
+        for callee_name, lines in calls_by_name.items():
             for tgt in candidates(nid, callee_name):
                 if tgt != nid:
-                    graph.add_edge(nid, tgt, type=EDGE_TYPE_INVOKES)
+                    graph.add_edge(nid, tgt, type=EDGE_TYPE_INVOKES,
+                                   call_lines=sorted(set(lines))[:20])
                     n_inv += 1
 
-        for comp_name in set(attrs.get('_renders', [])):
+        renders_by_name: Dict[str, List[dict]] = defaultdict(list)
+        for r in attrs.get('_renders', []):
+            renders_by_name[r['name']].append(r)
+        for comp_name, sites in renders_by_name.items():
             for tgt in candidates(nid, comp_name):
                 if tgt != nid and graph.nodes[tgt].get('is_component'):
-                    graph.add_edge(nid, tgt, type=EDGE_TYPE_RENDERS)
+                    ordered = sorted(sites, key=lambda s: s['line'])
+                    graph.add_edge(
+                        nid, tgt, type=EDGE_TYPE_RENDERS,
+                        jsx_lines=sorted({s['line'] for s in sites})[:20],
+                        sites=[{'line': s['line'], 'props': s['props']}
+                               for s in ordered if s['props']][:8] or None,
+                    )
                     n_ren += 1
 
         for base_name in set(attrs.get('_heritage', [])):

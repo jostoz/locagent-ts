@@ -97,6 +97,7 @@ Nuevo `dependency_graph/ts_build_graph.py`. Reutiliza el ensamblado networkx, el
 5. **`inherits`**: `class_heritage` → `extends`/`implements` → match por nombre a nodos clase.
 6. **`invokes`** — reemplaza `analyze_invokes`/`find_all_possible_callee`: walk de `call_expression`; callee `identifier` o `member_expression.property`; **match por nombre** contra nodos función/método conocidos (misma limitación heurística que la versión Python `ast`). Saltear defs anidadas.
 7. **Nuevo edge `renders`** (TS, alto valor): opening tag de `jsx_element`/`jsx_self_closing_element` con identificador PascalCase → nodo componente. Análogo UI de `invokes`. Agregar a `VALID_EDGE_TYPES` en `build_graph.py`; traversía/tools lo tratan como cualquier arista.
+   - **v2 (2026-09-09):** `renders` lleva `jsx_lines` + `sites` (`{line, props}`, `props` = prop→expresión bindeada colapsada) e `invokes` lleva `call_lines`. Query captura `@jsx.element` (nombre + atributos). `traverse` los muestra inline (`@L<líneas> {prop=expr}`). Cierra el gap de "el grafo sabe A→B pero no dónde ni con qué handler".
 
 ## Fase 2 — Índice propio + reuso (½-1 día)  ✅
 
@@ -277,11 +278,28 @@ bien. El servidor MCP no cambió. Ver [[harness-matters-mcp-clients]] en memoria
   cuyas call sites no están en una entidad nombrada, p.ej. asserts en callbacks
   anónimos de `it()`).
 
-**Gap sistémico (v2):** el grafo no modela **binding de props a nivel de sitio
-JSX**. `renders` dice "Board monta AiChatPanel" pero no "`onAction` está bindeada
-a `Board.handleAiAction` en la línea N". El modelo lo suple con grep+read nativo
-(runs 5 y 7). Candidato firme: **arista `renders` con metadata** (línea del tag +
-props bindeadas) en `tsx.scm` + `_add_reference_edges`.
+**Gap sistémico (v2) — CERRADO 2026-09-09:** el grafo v1 no modelaba **binding de
+props a nivel de sitio JSX** (`renders` decía "Board monta AiChatPanel" pero no
+"`onAction` bindeada a `handleAiAction` en la línea N"; el modelo lo suplía con
+grep+read nativo, runs 5/7/8).
+
+v2 enriquece las aristas con el call site, extraído en tree-sitter (sin tipos):
+- **`renders`** lleva `jsx_lines` (list[int]) + `sites` (`{line, props}` donde
+  `props` = prop → fuente colapsada de la expresión bindeada; arrows se reducen a
+  `(args) => …`). Query `tsx.scm` ahora captura `@jsx.element` entero (nombre +
+  atributos), no solo `@jsx.name`.
+- **`invokes`** lleva `call_lines` (list[int]).
+- `traverse` los renderiza inline:
+  `renders ── toolbars.tsx:ShapeFormatToolbar  @L189 {onLayer=onLayer, buttonStyle=iconButtonStyle(false)}`
+  y en 2 hops se ve el prop-drill completo hasta `Board  @L6511 {… onLayer=applyZOrder}`.
+- Schema de cache → `v2` (auto-invalida las caches v1).
+
+Verificado sobre `Documents/miro-clone`: build 0.5 s, 142 `renders` / 612
+`invokes` con metadata; `traverse upstream renders` sobre `LayerButtons` da la
+cadena `onLayer` con líneas en 1 llamada, sin fallback a grep.
+
+Cola para v3: `renders` sigue siendo name-match (colisión `FrameIcon` en 2
+archivos); resolución por import-scope como en `invokes`.
 
 **Config recurrente que muerde:** LM Studio JIT auto-load recarga el modelo al
 default (8192 ctx) si se descarga → todo revienta. Cargar explícito
