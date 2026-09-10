@@ -92,9 +92,10 @@ REPO = Path(os.environ.get('LOCAGENT_REPO', os.getcwd())).resolve()
 # cache lives in the target repo by default; override for read-only trees.
 CACHE_DIR = Path(os.environ['LOCAGENT_CACHE_DIR']).resolve() \
     if os.environ.get('LOCAGENT_CACHE_DIR') else REPO / '.locagent'
-_CACHE_SCHEMA = 'v3'          # bump to invalidate all caches on a schema change
+_CACHE_SCHEMA = 'v4'          # bump to invalidate all caches on a schema change
                              # v2: invokes/renders edges carry call-site lines + JSX props
                              # v3: renders/invokes disambiguated by import binding
+                             # v4: BM25 doc carries a weighted comment/JSDoc field
 _MAX_FULL_LINES = 400         # graph_get(full) cap before it suggests skeleton
 _SKELETON_MIN_LINES = 40      # below this, skeleton saves nothing -> return full
 _FILE_SKELETON_MAX_LINES = 120  # above this, a file gets a graph outline, not a raw skeleton
@@ -283,7 +284,13 @@ mcp = FastMCP(
         'returns the complete list with call-site lines. Never assemble that '
         'list by hand with grep or reworded graph_search queries. Once that '
         'traverse has returned, the list IS complete -- synthesise your answer '
-        'from it and stop; do not keep searching for more.'
+        'from it and stop; do not keep searching for more.\n'
+        'One thing the graph does NOT model: a convention expressed as a runtime '
+        'value check (e.g. "a note with color === undefined IS a text box", '
+        '"keep this list in sync with X"). No edge carries it. Use the graph to '
+        'find the cluster of entities involved, then grep/read is the right tool '
+        'to close out those value-level conventions -- that hand-off is expected, '
+        'not a failure.'
     ),
 )
 

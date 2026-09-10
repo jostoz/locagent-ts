@@ -31,10 +31,35 @@ from dependency_graph.traverse_graph import is_test_file
 
 _INDEXED_TYPES = (NODE_TYPE_FILE, NODE_TYPE_CLASS, NODE_TYPE_FUNCTION)
 _CODE_CHAR_CAP = 4000          # per-doc cap on raw source contribution
+_COMMENT_CHAR_CAP = 1500       # per-doc cap on the extracted comment field
 _STEMMER_LANG = 'english'
 
 _CAMEL_RE = re.compile(r'(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])')
 _SEP_RE = re.compile(r'[_\-./:\\]+')
+
+# `(?<![:/])` skips `http://` and `///` triple-slash directives; block form
+# also catches `/** JSDoc */`, with the per-line leading `*` stripped after.
+_LINE_COMMENT_RE = re.compile(r'(?<![:/])//[ \t]?(.*)')
+_BLOCK_COMMENT_RE = re.compile(r'/\*+([\s\S]*?)\*/')
+_JSDOC_STAR_RE = re.compile(r'^[ \t]*\*[ \t]?', re.M)
+
+
+def _comments_for(code: str) -> str:
+    """Pull comment / JSDoc prose out of an entity's source as its own weighted
+    field so a natural-language ``graph_search`` can rank the entity by what its
+    comments *say*. Value-level conventions ("``color === undefined`` means text
+    box", "keep in sync with X") live only in comments -- no code edge carries
+    them -- so without this they are invisible to the graph and only grep finds
+    them."""
+    if not code:
+        return ''
+    out: List[str] = []
+    for m in _BLOCK_COMMENT_RE.finditer(code):
+        out.append(_JSDOC_STAR_RE.sub('', m.group(1)))
+    for m in _LINE_COMMENT_RE.finditer(code):
+        out.append(m.group(1))
+    text = ' '.join(s.strip() for s in out if s.strip())
+    return text[:_COMMENT_CHAR_CAP]
 
 
 def _split_identifiers(text: str) -> str:
@@ -49,6 +74,7 @@ def _split_identifiers(text: str) -> str:
 def _doc_for_node(nid: str, ndata: dict) -> str:
     ntype = ndata.get('type')
     parts: List[str] = [nid, _split_identifiers(nid)]
+    code = ndata.get('code', '') or ''
 
     if ntype == NODE_TYPE_FILE:
         # for a file the raw `code` is the whole thing -- lean on a skeleton and
@@ -57,18 +83,22 @@ def _doc_for_node(nid: str, ndata: dict) -> str:
         if not skel:
             try:
                 from plugins.location_tools.utils.compress_file_ts import get_skeleton
-                skel = get_skeleton(ndata.get('code', '') or '',
-                                    language=ndata.get('language'))
+                skel = get_skeleton(code, language=ndata.get('language'))
             except Exception:
-                skel = (ndata.get('code', '') or '')[:_CODE_CHAR_CAP]
+                skel = code[:_CODE_CHAR_CAP]
         parts.append(skel[:_CODE_CHAR_CAP])
     else:
         if ndata.get('skeleton'):
             parts.append(ndata['skeleton'])
-        code = ndata.get('code', '') or ''
         parts.append(code[:_CODE_CHAR_CAP])
         if ndata.get('is_component'):
             parts.append('react component jsx')
+
+    # comment / JSDoc prose as its own field -- see _comments_for. Appended after
+    # the capped source so a convention noted past char 4000 is still indexed.
+    cmt = _comments_for(code)
+    if cmt:
+        parts.append(cmt)
 
     joined = '\n'.join(p for p in parts if p)
     return joined + '\n' + _split_identifiers(joined)

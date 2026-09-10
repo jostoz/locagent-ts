@@ -492,9 +492,46 @@ listo), y el ser un solo artefacto agnóstico al lenguaje.
 el name-match de `invokes` es el cuello de botella real. No adoptar como
 reemplazo.
 
+## Convenciones a nivel-valor: el otro blind spot del grafo (2026-09-10)
+
+Observado en una sesión real de Sonnet vía Cline (agregar `backgroundColor` a
+cajas de texto en miro-clone): usó los `graph_*` como está diseñado —
+`graph_search` → `graph_get` → `graph_traverse` upstream/renders para confirmar
+sitio único de montaje — y **después** cayó a grep, correctamente, para el
+discriminador `color === undefined` == "caja de texto", replicado por comentario
+en ~15 sitios sin ninguna arista que lo represente. Eso no es el name-match de
+`invokes`: es una convención sostenida por un chequeo de valor en runtime +
+disciplina de review. Ni tree-sitter ni `tsserver`/`solidlsp` ni Serena la ven —
+no es una referencia tipada.
+
+Tres niveles de respuesta, de más barato a más caro:
+
+1. **Comentarios/JSDoc como campo ponderado del doc BM25** — *hecho, `_CACHE_SCHEMA`
+   v4*. `_doc_for_node` en `ts_bm25.py` extrae comentario líder / JSDoc / bloques
+   `//` como parte propia (`_comments_for`, cap 1500 chars, salta `http://` y
+   `///`), garantizada aunque la convención esté pasado el char 4000 del cuerpo, y
+   con el 2x de `_split_identifiers`. Convierte "grep en frío" en "un
+   `graph_search('convención caja de texto')` te deja en el clúster".
+   Genérico, sin curación por repo. **Límite:** sólo halla sitios que *tienen* el
+   comentario; los guardas sin comentario siguen invisibles y no hay enumeración.
+2. **Aristas sintéticas desde patrones `IDENT === undefined`** — descartado por
+   tree-sitter (reinventa narrowing de uniones discriminadas, falsos positivos).
+   Si se hace, va en el híbrido `solidlsp` (es pregunta para `tsserver`).
+3. **Sidecar curado `.locagent/notes.yaml`** — notas humanas con la lista de
+   sitios acoplados; resuelve enumeración y los sitios sin comentario, pero es un
+   wiki a mano que se pudre y contradice "derivado del código". **Sólo si** la
+   Fase 4 muestra que estas convenciones son un modo de fallo frecuente y el
+   nivel 1 no alcanzó.
+
+Además: `instructions=` del MCP ahora dice explícitamente que para convenciones
+expresadas como chequeo de valor en runtime, el hand-off a grep es *esperado, no
+un fallo* — usar el grafo para hallar el clúster, grep para cerrarlo. (Falta
+espejar esa línea en `.clinerules/graph-first-localization.md` de miro-clone.)
+
 ## Riesgos / caveats
 
 - **`invokes` es heurístico por nombre** (sin tipos) — más ruidoso en TS. v2 híbrida posible: MCP llama a `tsserver` para `references` (vía `solidlsp` de Serena), tree-sitter para estructura. Ver sección "Serena" arriba.
+- **Convenciones a nivel-valor** (`x === undefined` = modo Y) no son aristas — mitigado parcialmente por el campo comentario del BM25 (v4); ver sección arriba.
 - **Prompts de LocAgent** (`util/prompts/*.j2`) mencionan idioms Python → edición ligera.
 - **Repo research, no librería mantenida** → asperezas de setup.
 - **Barrels/re-exports y monorepos**: cola larga más allá del v1.
