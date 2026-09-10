@@ -22,11 +22,14 @@ CLI::
 
     python -m dependency_graph.ts_build_graph --repo /path/to/repo [--output graph.pkl]
 
-Limitations (v1, see docs/TYPESCRIPT_PORT_PLAN.md):
+Limitations (see docs/TYPESCRIPT_PORT_PLAN.md):
   * ``invokes`` / ``renders`` / ``inherits`` are matched by *name* (no type
-    information), so they are heuristic and can be noisy.
+    information), disambiguated by the caller's import binding then by file
+    scope; a global name fallback still fires when nothing is in scope.
   * bare specifiers (``react``, ``konva``, ...) create no ``imports`` edge.
   * barrels / re-exports are resolved one hop only.
+  * components referenced only through a value (``const I = {a: AIcon}; <I.a/>``)
+    get no ``renders`` edge.
 """
 
 from __future__ import annotations
@@ -666,7 +669,8 @@ def _add_import_edges(graph, repo_path, file_imports, verbose=False):
 
 
 def _add_reference_edges(graph, file_imports, fuzzy_search=True, verbose=False):
-    """`invokes`, `renders`, `inherits` -- all name-matched."""
+    """`invokes`, `renders`, `inherits` -- all name-matched, disambiguated by
+    import binding then file scope."""
     # global name index: last-segment name -> [node_id]
     by_name: Dict[str, List[str]] = defaultdict(list)
     file_of: Dict[str, str] = {}
@@ -675,21 +679,35 @@ def _add_reference_edges(graph, file_imports, fuzzy_search=True, verbose=False):
             by_name[nid.split(':')[-1].split('.')[-1]].append(nid)
             file_of[nid] = nid.split(':')[0]
 
-    # per-file import target set (files + entities this file pulls in)
+    # per-file import sets, at two granularities: the exact entity a file pulls
+    # in by name (`import { FrameIcon } from './icons'` -> icons.tsx:FrameIcon),
+    # and the coarser set of files it imports from at all.
     imported_files: Dict[str, set] = defaultdict(set)
-    for src, _dst, attrs in graph.edges(data=True):
+    imported_entities: Dict[str, set] = defaultdict(set)
+    for src, dst, attrs in graph.edges(data=True):
         if attrs.get('type') == EDGE_TYPE_IMPORTS:
-            imported_files[src].add(_dst.split(':')[0])
+            imported_files[src].add(dst.split(':')[0])
+            if ':' in dst:
+                imported_entities[src].add(dst)
 
     def candidates(caller_nid: str, callee_name: str) -> List[str]:
         cands = by_name.get(callee_name, [])
         if not cands:
             return []
         caller_file = file_of.get(caller_nid, '')
+        # 1. the caller's file imports this exact entity by name, or it is
+        #    defined in the caller's own file -- unambiguous, use only these.
+        bound = [c for c in cands
+                 if c in imported_entities.get(caller_file, ())
+                 or file_of.get(c) == caller_file]
+        if bound:
+            return bound
+        # 2. the candidate lives in some file the caller imports from.
         allowed = imported_files.get(caller_file, set()) | {caller_file}
         scoped = [c for c in cands if file_of.get(c) in allowed]
         if scoped:
             return scoped
+        # 3. nothing in scope -- global name match (heuristic, opt-in).
         return cands if fuzzy_search else []
 
     n_inv = n_ren = n_inh = 0

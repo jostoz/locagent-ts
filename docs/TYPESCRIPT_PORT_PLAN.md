@@ -315,8 +315,19 @@ Verificado sobre `Documents/miro-clone`: build 0.5 s, 142 `renders` / 612
 `invokes` con metadata; `traverse upstream renders` sobre `LayerButtons` da la
 cadena `onLayer` con líneas en 1 llamada, sin fallback a grep.
 
-Cola para v3: `renders` sigue siendo name-match (colisión `FrameIcon` en 2
-archivos); resolución por import-scope como en `invokes`.
+**v3 (2026-09-09) — `renders`/`invokes` desambiguados por import binding:**
+`candidates()` en `_add_reference_edges` ahora prioriza, en orden: (1) la entidad
+exacta que el archivo del caller importa por nombre (`import { FrameIcon } from
+'./icons'` → `icons.tsx:FrameIcon`) o define localmente; (2) archivos que el
+caller importa; (3) name-match global (fallback heurístico). Usa las aristas
+`imports` entity-level que ya construye `_add_import_edges`. Efecto sobre
+miro-clone: `renders` 142 → 138 (4 colisiones de nombre de icono eliminadas:
+`Board→FramesPanel.tsx:FrameIcon`, `BoardListPage→…GearIcon`, etc.), `invokes`
+612 → 612 sin cambios, **0 componentes nuevos huérfanos** (mismo set de 29 que
+v2 — dinámicos vía mapa de iconos + `App` raíz). Schema de cache → `v3`.
+
+Cola para v4: componentes referidos solo por valor (`const ICONS = {line:
+LineIcon}; <ICONS[k] />`) no generan `renders` — 10 de los 29 huérfanos son eso.
 
 **Re-test v2 (2026-09-09) — dos footguns del arnés/tool, ambos arreglados
 (`64dc9ad`):** corriendo *"which handler is wired to `AiChatPanel`'s `onAction`"*
