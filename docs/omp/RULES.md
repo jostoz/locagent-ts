@@ -5,12 +5,12 @@ sticky). Para cualquier bug / refactor en un repo TS/TSX:
 
 ## 1. Diagnóstico — MCP `locagent`
 
-- `get_repo_overview` una vez por sesión para el layout.
-- `search_code_entities("<descripción de la tarea>")` → entidades con `file:line`,
+- `graph_map` una vez por sesión para el layout.
+- `graph_search("<descripción de la tarea>")` → entidades con `file:line`,
   firma corta y flag `[component]`.
-- `traverse("<id>", edge_types=["invokes","renders","imports"], direction="both")`
+- `graph_traverse("<id>", edge_types=["invokes","renders","imports"], direction="both")`
   para ver llamadores y dependencias **antes** de tocar nada.
-- `get_entity("<id>", "skeleton")` primero; `"full"` solo cuando vas a editar.
+- `graph_get("<id>", "skeleton")` primero; `"full"` solo cuando vas a editar.
   Nunca `read` de un archivo grande entero — si la entidad es enorme, pedí la
   entidad anidada (`Componente.handleX`).
 
@@ -22,7 +22,7 @@ sticky). Para cualquier bug / refactor en un repo TS/TSX:
 
 ## 3. Edición — nativo OMP
 
-- `edit` hashline sobre el rango acotado que devolvió `get_entity`.
+- `edit` hashline sobre el rango acotado que devolvió `graph_get`.
 - Nunca reescribir el archivo completo.
 
 ## Notas

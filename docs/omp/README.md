@@ -1,7 +1,7 @@
 # Usar LocAgent-TS desde OMP (oh-my-pi / omp.sh)
 
 `locagent_mcp.py` es un servidor MCP stdio con 4 tools:
-`search_code_entities`, `get_entity`, `traverse`, `get_repo_overview`.
+`graph_search`, `graph_get`, `graph_traverse`, `graph_map`.
 OMP lo descubre por `.omp/mcp.json`.
 
 ## 1. Instalar OMP (una vez, Windows)

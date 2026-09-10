@@ -97,7 +97,7 @@ Nuevo `dependency_graph/ts_build_graph.py`. Reutiliza el ensamblado networkx, el
 5. **`inherits`**: `class_heritage` → `extends`/`implements` → match por nombre a nodos clase.
 6. **`invokes`** — reemplaza `analyze_invokes`/`find_all_possible_callee`: walk de `call_expression`; callee `identifier` o `member_expression.property`; **match por nombre** contra nodos función/método conocidos (misma limitación heurística que la versión Python `ast`). Saltear defs anidadas.
 7. **Nuevo edge `renders`** (TS, alto valor): opening tag de `jsx_element`/`jsx_self_closing_element` con identificador PascalCase → nodo componente. Análogo UI de `invokes`. Agregar a `VALID_EDGE_TYPES` en `build_graph.py`; traversía/tools lo tratan como cualquier arista.
-   - **v2 (2026-09-09):** `renders` lleva `jsx_lines` + `sites` (`{line, props}`, `props` = prop→expresión bindeada colapsada) e `invokes` lleva `call_lines`. Query captura `@jsx.element` (nombre + atributos). `traverse` los muestra inline (`@L<líneas> {prop=expr}`). Cierra el gap de "el grafo sabe A→B pero no dónde ni con qué handler".
+   - **v2 (2026-09-09):** `renders` lleva `jsx_lines` + `sites` (`{line, props}`, `props` = prop→expresión bindeada colapsada) e `invokes` lleva `call_lines`. Query captura `@jsx.element` (nombre + atributos). `graph_traverse` los muestra inline (`@L<líneas> {prop=expr}`). Cierra el gap de "el grafo sabe A→B pero no dónde ni con qué handler".
 
 ## Fase 2 — Índice propio + reuso (½-1 día)  ✅
 
@@ -133,16 +133,16 @@ Nuevo `dependency_graph/ts_build_graph.py`. Reutiliza el ensamblado networkx, el
 **Estado (2026-09-08): `locagent_mcp.py` funcional, probado sobre miro-clone vía protocolo stdio real.**
 
 - ✅ `locagent_mcp.py` con `mcp==1.13.1` (`FastMCP`, transport `stdio`). 4 tools:
-  - `search_code_entities(query, max_results=10, scope="all"|"function"|"class"|"file")` →
+  - `graph_search(query, max_results=10, scope="all"|"function"|"class"|"file")` →
     **fusión RRF** de `ts_bm25` + `fuzzy_retriever` → lista con id, tipo, `file:line`, firma corta,
     flag `[component]`.
-  - `get_entity(entity_id, mode="skeleton"|"full")` → skeleton (attr del nodo, o `compress_file_ts`
+  - `graph_get(entity_id, mode="skeleton"|"full")` → skeleton (attr del nodo, o `compress_file_ts`
     para files) o código con números de línea. `full` sobre entidad > 400 líneas devuelve skeleton +
     aviso (Board = 6325 líneas → no se inlinea). `_resolve_id` tolera nombre pelado / falta de prefijo
     de dir / `file:Entity` sin path / `Clase.metodo`.
-  - `traverse(entity_id, edge_types?, direction="both"|"downstream"|"upstream", hops=2)` →
+  - `graph_traverse(entity_id, edge_types?, direction="both"|"downstream"|"upstream", hops=2)` →
     `traverse_tree_structure` (árbol indentado; **sin `pydot`**). Cap 6k chars.
-  - `get_repo_overview(max_depth=3)` → árbol de directorios/archivos (con nº de entidades por file) +
+  - `graph_map(max_depth=3)` → árbol de directorios/archivos (con nº de entidades por file) +
     conteos de nodos/aristas.
 - ✅ Confinamiento: build sólo de `REPO` (= `cwd` o `$LOCAGENT_REPO`). `os.walk` poda `SKIP_DIRS` +
   dotdirs. Cero `..`.
@@ -161,8 +161,8 @@ Nuevo `dependency_graph/ts_build_graph.py`. Reutiliza el ensamblado networkx, el
   Backup en `cline_mcp_settings.json.bak-locagent`.
 
 Verificación (cliente stdio mínimo): `initialize` + `tools/list` + `tools/call` ×4 → todo JSON-RPC
-limpio en stdout; `search_code_entities("z order bring to front")` → `zorder.ts:reorder` +
-`BringToFrontIcon`; `traverse(LayerButtons, upstream)` → `renders-by ShapeFormatToolbar/
+limpio en stdout; `graph_search("z order bring to front")` → `zorder.ts:reorder` +
+`BringToFrontIcon`; `graph_traverse(LayerButtons, upstream)` → `renders-by ShapeFormatToolbar/
 ImageFormatToolbar`; warm start recarga cache sin rebuild.
 
 ## Fase 4 — Paper: estudio empírico (DIFERIDA — no ahora)
@@ -178,7 +178,7 @@ búsqueda nativa del agente, y retrieval por LSP (Serena)?
 
 **Condiciones:** (a) qwen-Cline sin retrieval · (b) + `search_codebase` nativo · (c) +
 LocAgent-TS MCP · (d) + Serena.
-**Ablations de (c):** sin edge `renders`; sin `invokes`; solo BM25 vs BM25 + fuzzy + `traverse`.
+**Ablations de (c):** sin edge `renders`; sin `invokes`; solo BM25 vs BM25 + fuzzy + `graph_traverse`.
 
 **Métricas:** acc@k y recall@k a nivel archivo y a nivel función/entidad, k ∈ {1, 3, 5, 10}.
 Nota: reimplementar acc@k / recall@k **sin `torch`** — las de `evaluation/eval_metric.py`
@@ -206,8 +206,8 @@ ablations ~2 días; redacción ~1 semana.
 
 1. `python -m dependency_graph.ts_build_graph --repo C:/Users/joz/orca/workspaces/miro-clone/bichir` → grafo networkx sin excepciones; `Board.tsx` produce N nodos función (incluye el componente de la toolbar) con line-ranges correctos.
 2. Spot-check: nodo del componente de la barra tiene aristas `renders` entrantes de su contenedor + `imports` correctas.
-3. MCP: `search_code_entities("toolbar")` → el componente correcto; `get_entity(id, "full")` → ~150 líneas, no 7.565.
-4. Cline + qwen con el MCP: "estandarizá los estilos de la barra" → llama `search_code_entities` → `get_entity` → edita el trozo acotado, sin `read_files` del archivo entero, sin `cd ..`.
+3. MCP: `graph_search("toolbar")` → el componente correcto; `graph_get(id, "full")` → ~150 líneas, no 7.565.
+4. Cline + qwen con el MCP: "estandarizá los estilos de la barra" → llama `graph_search` → `graph_get` → edita el trozo acotado, sin `read_files` del archivo entero, sin `cd ..`.
 5. (diferida) Fase 4: acc@5 a nivel archivo de (c) > (a) y (b); comparar con (d).
 
 ## Integración con clientes MCP
@@ -244,14 +244,14 @@ LM Studio, 65k ctx) + `locagent` MCP sobre `Documents/miro-clone` @ `origin/main
 basura. Ej.: "z-order de las shapes" → `zorder.ts:reorder` + wrappers por tipo +
 `Board.applyZOrder` + `LayerButtons`; "mapear llamadores de `reorder` antes de
 tocar" → mapa de impacto completo, se detuvo a preguntar la firma nueva;
-"traverse renders desde Board" → árbol de componentes de 4 hops.
+"graph_traverse renders desde Board" → árbol de componentes de 4 hops.
 
 **Primer A/B medido (b) vs (c)** — mismo modelo, mismo prompt exacto
-(`traverse upstream renders sobre LayerButtons`):
+(`graph_traverse upstream renders sobre LayerButtons`):
 
 | | tool calls | contexto | resultado |
 |---|---|---|---|
-| **con `locagent`** | **1** (`traverse`) | **~5k tokens** | `Board → {ShapeFormatToolbar, ImageFormatToolbar} → LayerButtons`, completo |
+| **con `locagent`** | **1** (`graph_traverse`) | **~5k tokens** | `Board → {ShapeFormatToolbar, ImageFormatToolbar} → LayerButtons`, completo |
 | **sin** (solo grep/read de Cline) | **~25** (10+ reads, 10+ searches, 3 comandos PowerShell fallidos) | **~60k tokens** (leyó ~5000 líneas de `Board.tsx` en chunks) | mismo, por el camino largo |
 
 **12× menos contexto, 25× menos tool calls, misma respuesta.** Para un modelo de
@@ -268,14 +268,14 @@ it mounted?"*, Cline + qwen3.5-9b, misma pregunta en 3 condiciones:
 | corrida | setup | tool calls | grep/read nativo | contexto |
 |---|---|---|---|---|
 | 1 | MCP, sin rule | 1 `search` + ~11 nativos | 5 read + 6 search | 18.6k |
-| 2 | MCP + `.clinerules`, pre-fix | 3 `search` + `get_entity` + `traverse`→∅ | ~10 `Select-String` | 27.6k |
-| 3 | MCP + `.clinerules` + fixes `64dc9ad` | **1 `search` + 1 `traverse`** | **0** | **7.6k** |
+| 2 | MCP + `.clinerules`, pre-fix | 3 `search` + `graph_get` + `graph_traverse`→∅ | ~10 `Select-String` | 27.6k |
+| 3 | MCP + `.clinerules` + fixes `64dc9ad` | **1 `search` + 1 `graph_traverse`** | **0** | **7.6k** |
 
 Respuesta correcta en las 3 (`handleAiAction`, L6077). La corrida 3 es el camino
-buscado: `search_code_entities` devuelve el componente #1, `traverse renders
+buscado: `graph_search` devuelve el componente #1, `graph_traverse renders
 upstream` da la respuesta en la anotación `@L6077 {onAction=handleAiAction}`. El
 delta 1→3 (18.6k→7.6k, 12 calls→2) no es v2 solo: es v2 + ranking exact-match +
-`traverse` sobre file + la rule que orienta al 9B al grafo. Sin *alguno* de esos
+`graph_traverse` sobre file + la rule que orienta al 9B al grafo. Sin *alguno* de esos
 cuatro, el modelo chico vuelve a grep.
 
 **Arnés — hallazgo clave:** OMP volteó a los modelos chicos con su indirección
@@ -284,12 +284,12 @@ loopeaba). Cline las expone directo (`mcp__locagent__*`) → el mismo 9b las usa
 bien. El servidor MCP no cambió. Ver [[harness-matters-mcp-clients]] en memoria.
 
 **Fixes que salieron del piloto** (todos commiteados):
-- `084f4de` — `get_entity`/`traverse` aceptan `id` además de `entity_id`; entidad
+- `084f4de` — `graph_get`/`graph_traverse` aceptan `id` además de `entity_id`; entidad
   < 40 líneas → devuelve `full` (elidir no ahorra nada).
-- `420b195` + `51cd828` — `get_entity` sobre un **file** (skeleton **o** full) da
+- `420b195` + `51cd828` — `graph_get` sobre un **file** (skeleton **o** full) da
   el *outline* del grafo (entidades top-level, ~60 líneas), no el skeleton crudo
   (`Board.tsx`: 1375 → 16 líneas). Un file nunca se inlinea entero.
-- `226e12a` — `traverse` `include_tests` (default True para `upstream`): los tests
+- `226e12a` — `graph_traverse` `include_tests` (default True para `upstream`): los tests
   son lo que más rompe un cambio de firma; el docstring guía a
   `edge_types=["invokes","imports"]` upstream (`imports` engancha dependientes
   cuyas call sites no están en una entidad nombrada, p.ej. asserts en callbacks
@@ -306,13 +306,13 @@ v2 enriquece las aristas con el call site, extraído en tree-sitter (sin tipos):
   `(args) => …`). Query `tsx.scm` ahora captura `@jsx.element` entero (nombre +
   atributos), no solo `@jsx.name`.
 - **`invokes`** lleva `call_lines` (list[int]).
-- `traverse` los renderiza inline:
+- `graph_traverse` los renderiza inline:
   `renders ── toolbars.tsx:ShapeFormatToolbar  @L189 {onLayer=onLayer, buttonStyle=iconButtonStyle(false)}`
   y en 2 hops se ve el prop-drill completo hasta `Board  @L6511 {… onLayer=applyZOrder}`.
 - Schema de cache → `v2` (auto-invalida las caches v1).
 
 Verificado sobre `Documents/miro-clone`: build 0.5 s, 142 `renders` / 612
-`invokes` con metadata; `traverse upstream renders` sobre `LayerButtons` da la
+`invokes` con metadata; `graph_traverse upstream renders` sobre `LayerButtons` da la
 cadena `onLayer` con líneas en 1 llamada, sin fallback a grep.
 
 **v3 (2026-09-09) — `renders`/`invokes` desambiguados por import binding:**
@@ -334,27 +334,27 @@ LineIcon}; <ICONS[k] />`) no generan `renders` — 10 de los 29 huérfanos son e
 correcto —`icons.tsx:FrameIcon ← Board @L5589,6123`; `FramesPanel.tsx:FrameIcon ←
 FramesPanel @L91`, sin cruce (con v2 el segundo traía un `renders-by` fantasma de
 `Board`)—, 0 file reads, 10.5k contexto. El 9B **sí** metió un error de lectura:
-corrió `traverse ... hops=2` y aplastó la cadena `FrameIcon ←@L91 FramesPanel
+corrió `graph_traverse ... hops=2` y aplastó la cadena `FrameIcon ←@L91 FramesPanel
 ←@L6901 Board` a "Board renderiza FrameIcon en L6901" (L6901 es el mount de
-`<FramesPanel/>`, no del icono). Mitigación (`<commit>`): docstring de `traverse`
+`<FramesPanel/>`, no del icono). Mitigación (`<commit>`): docstring de `graph_traverse`
 aclara que `@L<línea>` pertenece a la arista —es una línea del *padre*— y que para
 "qué renderiza directamente a X" se usa `hops=1`; la `.clinerules` agrega "tu
-primera tool call es `search_code_entities`, no `search_files`".
+primera tool call es `graph_search`, no `search_files`".
 
 **Re-test v2 (2026-09-09) — dos footguns del arnés/tool, ambos arreglados
 (`64dc9ad`):** corriendo *"which handler is wired to `AiChatPanel`'s `onAction`"*
 con Cline + qwen3.5-9b, el modelo (a) recibió una lista de entidades inútil
-—`search_code_entities("AiChatPanel", max=5)` rankeaba `SendIcon`/`nextMessageId`
+—`graph_search("AiChatPanel", max=5)` rankeaba `SendIcon`/`nextMessageId`
 por encima del componente `AiChatPanel`, que caía fuera del top 5— y (b) hizo
-`traverse` sobre el **nodo file** (`AiChatPanel.tsx`), que devolvía *"no renders
+`graph_traverse` sobre el **nodo file** (`AiChatPanel.tsx`), que devolvía *"no renders
 neighbours"* porque `renders`/`invokes`/`inherits` cuelgan de entidades, no de
 files. Sin respuesta del grafo → fallback a `Select-String` (10+ comandos).
-Fixes: exact-name-match sube al top en `search_code_entities` (componentes
-primero); `traverse` sobre un file expande a sus entidades top-level y recorre
+Fixes: exact-name-match sube al top en `graph_search` (componentes
+primero); `graph_traverse` sobre un file expande a sus entidades top-level y recorre
 cada una. **Lección para el paper:** el valor del grafo depende de que (1) el
 retrieval devuelva el id correcto y (2) las tool signatures no tengan bordes que
 manden al modelo chico de vuelta a grep. Sin la rule de Cline retrieval-first el
-9B no llama a `traverse` en una pregunta natural de wiring —lo hace cuando el
+9B no llama a `graph_traverse` en una pregunta natural de wiring —lo hace cuando el
 prompt nombra la herramienta (`a5e6fa1`) o cuando una `.clinerules` lo obliga.
 
 **Config recurrente que muerde:** LM Studio JIT auto-load recarga el modelo al
@@ -387,18 +387,18 @@ Studio como function-calling OpenAI, sobre `Documents/miro-clone`):
 
 | prompt | tool calls | tiempo | ctx pico | resultado |
 |---|---|---|---|---|
-| wiring de `onAction` de `AiChatPanel` | **2** (`search`→`traverse renders upstream hops=1`) | 6-9 s | ~1.4k | `handleAiAction` @ `Board.tsx:L6077` ✅ (= ground truth) |
+| wiring de `onAction` de `AiChatPanel` | **2** (`search`→`graph_traverse renders upstream hops=1`) | 6-9 s | ~1.4k | `handleAiAction` @ `Board.tsx:L6077` ✅ (= ground truth) |
 | localización z-order | 6 | 14 s | ~3.5k | `zorder.ts:reorder` + fan-out en `Board.applyZOrder` + `toolbars.tsx:LayerButtons` ✅ |
 
 Grafo headless OK (745 nodos / 1841 aristas). Contexto nunca pasó de ~3.5k de
 65536. Dos footguns que salieron:
-- **`get_entity`/`traverse` rechazaban el id que `search_code_entities` imprimía:**
+- **`graph_get`/`graph_traverse` rechazaban el id que `graph_search` imprimía:**
   la salida mostraba `…:AiChatPanel [component]` y el modelo lo copiaba entero →
   `no entity in this repo`. Fix (este commit): `_resolve_id` stripea un `[tag]`
-  final; `search_code_entities` ahora pone `component` dentro del paréntesis
+  final; `graph_search` ahora pone `component` dentro del paréntesis
   (`(function, component, <loc>)`), no pegado al id.
-- Sin recipe explícito en el system prompt el MoE loopea `search_code_entities`
-  con queries reformuladas y no llega a `traverse` en una pregunta natural de
+- Sin recipe explícito en el system prompt el MoE loopea `graph_search`
+  con queries reformuladas y no llega a `graph_traverse` en una pregunta natural de
   wiring — mismo patrón que el 9B; lo resuelve la `.clinerules` retrieval-first.
 
 `reasoning_effort:"low"` en este modelo son ~150-200 tokens de think; con
@@ -410,15 +410,15 @@ Grafo headless OK (745 nodos / 1841 aristas). Contexto nunca pasó de ~3.5k de
 
 | prompt | tool calls | grep/read nativo | resultado |
 |---|---|---|---|
-| wiring de `onAction` de `AiChatPanel` | **2** (`search`→`traverse renders upstream hops=1`) | **0** | `handleAiAction` @ `Board.tsx:L6077` ✅ |
+| wiring de `onAction` de `AiChatPanel` | **2** (`search`→`graph_traverse renders upstream hops=1`) | **0** | `handleAiAction` @ `Board.tsx:L6077` ✅ |
 | localización z-order (v1 instructions) | ~10 grafo | ~6 (`read_files`×3, `search_codebase`×1, `run_commands` grep×2) | correcto y exhaustivo, pero viola la hard rule "3+ búsquedas nativas → pará" |
-| localización z-order (tras afilar `instructions=` del server) | 12 grafo | 5 (`read_files`×3, `search_codebase`×2, **0 shell grep**) | correcto; sigue sin usar `traverse invokes upstream` para enumerar wrappers |
+| localización z-order (tras afilar `instructions=` del server) | 12 grafo | 5 (`read_files`×3, `search_codebase`×2, **0 shell grep**) | correcto; sigue sin usar `graph_traverse invokes upstream` para enumerar wrappers |
 
 **Cierre del paso 1:** el transporte MCP de Cline **funciona** (era la duda tras
 el detour de OMP). En preguntas de wiring acotadas la disciplina grafo-primero es
 limpia (2 calls, 0 nativo). En preguntas amplias de "enumerá todo lo que
 toca X" el MoE 35B-A3B recae a `search`+`read_files` en vez de una sola
-`traverse(X, upstream, invokes)` — afilar `instructions=` del server sacó el
+`graph_traverse(X, upstream, invokes)` — afilar `instructions=` del server sacó el
 shell-grep pero no cambió el patrón de fondo. Es el mismo techo que el doc ya
 anota para el 9B; la respuesta igual sale correcta. Empujar más = tool
 `find_callers(entity)` con nombre inequívoco, o modelo más grande.
@@ -427,6 +427,35 @@ Config extra que muerde: la GUI de LM Studio abierta puede descargar el modelo
 cargado por CLI a mitad de sesión (`unloadPreviousModelOnSelect`) → Cline corta
 con `Engine protocol predict request failed: fetch failed`. Recargar y no tocar
 la GUI, o cargar todo desde la GUI.
+
+**Rename de tools `graph_*` + matriz A/B controlada (2026-09-10, commit `55c9efb`):**
+
+El 9B emitía las tools nativas de Cline (`search_codebase`/`read_file`) para
+preguntas where/which/who: los nombres viejos (`search_code_entities`, etc.)
+pattern-matcheaban contra ellas. Fix: rename a `graph_search` / `graph_get` /
+`graph_traverse` / `graph_map`; `instructions=` del server + `.clinerules`
+declaran que las tools nativas son el instrumento equivocado para localización.
+
+Matriz de 5 prompts (wiring puntual, def puntual, enumerar-todo, callers,
+renders-upstream) × `qwen3.5-9b` vs `qwen3.5-35b-a3b`, transporte Cline real,
+**a 65536 ctx** (a 16k/32k el q3 amplio entra en spiral de compactación — no es
+el rename, es la ventana):
+
+| | 9B antes (`search_code_entities`, 32k) | 9B después (`graph_*`, 65k) | 35B después |
+|---|---|---|---|
+| correct | 5/5 | **5/5** | **5/5** |
+| avg llamadas nativas | **3.8** | **0.0** | 0.4 |
+| q3 (enumerar) nativas | **17** | **0** | 2 |
+| 1ª llamada = tool del grafo | 4/5 | **5/5** | 5/5 |
+| avg seg | 16 | **12** | 36 |
+
+El 9B pasa a **0 llamadas nativas** en los 5 prompts, arranca cada uno con
+`graph_search`. Con la ventana correcta, **9B y 35B empatan 5/5** — el flip-flop
+previo (9B 4/5 ↔ 35B 4/5) era ruido de context chico. El 9B queda como pick:
+3× más rápido (12 vs 36 s), 1/3 de VRAM (6.5 vs 22 GB), misma accuracy.
+
+Lección: el nombre de la tool le pesa más al modelo chico que el docstring, y la
+ventana de contexto tiene que ser la real (65k) para medir cualquier otra cosa.
 
 ## Riesgos / caveats
 
