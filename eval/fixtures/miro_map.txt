@@ -1,0 +1,89 @@
+miro-clone: 87 files, 638 functions (145 React components), 5 classes
+edges: {'contains': 756, 'invokes': 612, 'imports': 335, 'renders': 138}
+```
+├── scripts
+│   └── verify-slides-autofit.ts  (1 entities)
+├── server
+│   ├── scripts
+│   │   └── generate-board-action-dataset.ts  (2 entities)
+│   └── src
+│       ├── index.ts  (10 entities)
+│       ├── slidesRoutes.ts  (1 entities)
+│       ├── streamAccumulator.test.ts  (1 entities)
+│       └── streamAccumulator.ts  (3 entities)
+├── src
+│   ├── board
+│   │   ├── storage
+│   │   ├── AiChatPanel.tsx  (6 entities)
+│   │   ├── Board.test.tsx  (32 entities)
+│   │   ├── Board.tsx  (12 entities)
+│   │   ├── BoardOverlays.tsx  (7 entities)
+│   │   ├── FrameShapes.tsx  (7 entities)
+│   │   ├── FramesPanel.tsx  (3 entities)
+│   │   ├── ImagePickerPanel.tsx  (1 entities)
+│   │   ├── aiLayout.ts  (1 entities)
+│   │   ├── backgroundRemoval.ts  (5 entities)
+│   │   ├── boardGeometry.ts  (30 entities)
+│   │   ├── clipboardImage.ts  (3 entities)
+│   │   ├── icons.tsx  (37 entities)
+│   │   ├── ocr.ts  (3 entities)
+│   │   ├── toolbars.tsx  (4 entities)
+│   │   ├── useBoardImages.test.ts  (1 entities)
+│   │   ├── useBoardImages.ts  (4 entities)
+│   │   ├── useBoardPersistence.ts  (1 entities)
+│   │   ├── useConnectors.test.ts  (1 entities)
+│   │   ├── useConnectors.ts  (4 entities)
+│   │   ├── useShapes.test.ts  (1 entities)
+│   │   ├── useShapes.ts  (3 entities)
+│   │   ├── useStickyNotes.test.ts  (1 entities)
+│   │   ├── useStickyNotes.ts  (12 entities)
+│   │   ├── zorder.test.ts  (3 entities)
+│   │   └── zorder.ts  (2 entities)
+│   ├── boards
+│   │   ├── BoardCard.tsx  (9 entities)
+│   │   ├── BoardFolderCard.tsx  (4 entities)
+│   │   ├── BoardListPage.tsx  (3 entities)
+│   │   ├── BoardListTable.tsx  (5 entities)
+│   │   └── CreateFolderDialog.tsx  (1 entities)
+│   ├── components
+│   │   ├── ui
+│   │   └── slide-layouts.ts
+│   ├── lib
+│   │   ├── content-converters.ts  (13 entities)
+│   │   ├── document-navigation.ts  (11 entities)
+│   │   ├── performance-utils.ts  (6 entities)
+│   │   ├── remoteImage.test.ts
+│   │   ├── remoteImage.ts  (1 entities)
+│   │   ├── tiptap-inline-streaming.ts  (4 entities)
+│   │   └── utils.ts  (1 entities)
+│   ├── settings
+│   │   ├── ApiKeysSettingsModal.test.tsx
+│   │   ├── ApiKeysSettingsModal.tsx  (4 entities)
+│   │   ├── apiKeysStorage.test.ts
+│   │   └── apiKeysStorage.ts  (6 entities)
+│   ├── slides
+│   │   ├── MagicDocument.tsx  (1 entities)
+│   │   ├── bloque-preview.tsx  (2 entities)
+│   │   ├── content-tracker.tsx  (2 entities)
+│   │   ├── enhanced-bloques-dock.tsx  (3 entities)
+│   │   ├── generate-deck-dialog.tsx  (1 entities)
+│   │   ├── modern-editor.tsx  (1 entities)
+│   │   ├── pptxExport.realOutput.test.ts  (1 entities)
+│   │   ├── pptxExport.test.ts  (3 entities)
+│   │   ├── pptxExport.ts  (7 entities)
+│   │   ├── slide-layouts.tsx  (6 entities)
+│   │   ├── slide-styles.tsx  (2 entities)
+│   │   ├── slides-editor.tsx  (4 entities)
+│   │   ├── textFit.test.ts  (1 entities)
+│   │   ├── textFit.ts  (6 entities)
+│   │   ├── types.ts
+│   │   └── use-magic-document-stream.ts  (1 entities)
+│   ├── test
+│   │   ├── bootstrap.smoke.test.ts
+│   │   └── setup.ts
+│   ├── App.tsx  (2 entities)
+│   └── main.tsx
+├── postcss.config.js
+├── tailwind.config.js
+└── vite.config.ts
+```
