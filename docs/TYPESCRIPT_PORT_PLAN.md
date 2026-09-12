@@ -546,7 +546,37 @@ v4 hace hallable el clúster, no hace que un 9b deje de sobre-leer.
 
 **Pendiente antes de Fase 4:** los ground truths de miro-clone (líneas) driftearon
 desde que Sonnet editó el repo — re-fijarlos contra `HEAD` actual antes de que el
-acc@k sea confiable.
+acc@k sea confiable. **Hecho en Stage 0 (2026-09-11)** — ver `eval/README.md` y
+el commit `a2d0d44`; el corpus quedó re-pineado contra un checkout limpio de
+`da9acfe` (el pin original se había hecho por error contra un working tree
+sucio con residuos de la sesión fallida del post-mortem).
+
+## Pendiente — ideas para después del gate de Stage 1/2 (no comprometidas)
+
+- **Experimento GESTADO x locagent-ts.** GESTADO (`C:/Users/joz/orca/workspaces/Gestado/cabezon`)
+  es un runtime de estado acotado y validado para agentes LLM (fusión
+  determinista Σ(t+1) = Σ(t) ⊕ ΔΣ(t), sin transcript persistente) que ataca el
+  mismo problema de fondo que encontramos en el stress test de Stage 1: el 9b
+  local pierde de vista hechos ya establecidos (p.ej. "agregué la prop
+  `opacity` a `ShapeFormatToolbar`, falta el call site en `Board.tsx`") cuando
+  el contexto de una sesión larga crece sin límite. El "carry" de
+  `eval/render_step.py` (una nota de texto recortada a 800 chars entre pasos)
+  es una versión artesanal y no validada de exactamente esa idea.
+  **Experimento propuesto:** re-correr la tarea de estrés "opacidad" (la que
+  rompió el wiring dos veces — ver `eval/results/ablation_stress/`) con el
+  estado del ejecutor gestionado por el runtime de GESTADO en vez del
+  `carry.json` ad hoc, y ver si el bug de wiring incompleto desaparece. Si
+  sale positivo: candidato a reemplazar el modelo de estado de
+  `OrchestratorState` (Stage 2) y a simplificar el nodo supervisor (leería el
+  estado Σ ya destilado en vez de reconstruir "qué pasó" desde `git diff` +
+  el log de herramientas cada vez).
+- **`qwen3.8-27b` optimizado con Unsloth sí es viable localmente** (dato nuevo,
+  2026-09-11) — contradice el hallazgo previo de esta rama ("`qwen3.8-27b` —
+  inutilizable, timeouts >6min/query" con el quant que se había probado antes,
+  ver [[unsloth-27b-viable]] en memoria). Si se confirma con una medición
+  formal, cambia el cálculo de qué modelo usar como referencia `strong-solo`
+  local en la matriz de Stage 1 (hoy: DeepSeek API) o como planificador local
+  de respaldo sin depender de una API paga.
 
 ## Riesgos / caveats
 
