@@ -551,8 +551,54 @@ el commit `a2d0d44`; el corpus quedó re-pineado contra un checkout limpio de
 `da9acfe` (el pin original se había hecho por error contra un working tree
 sucio con residuos de la sesión fallida del post-mortem).
 
+## Stage 2 — decidido: PAIOS como protocolo, no LangGraph (2026-09-11)
+
+**Decisión tomada y documentada en `paios-bootstrap/decisions/0018-integracion-locagent-ts-stage2.md`
+— no se re-deriva el razonamiento acá, solo el resumen ejecutable.**
+
+Stage 2 adopta el **mecanismo** de PAIOS (`C:/Users/joz/Documents/paios-bootstrap`
+— "Portable AI Operating System"): `authority.can_modify` hasheado, zonas
+protegidas, `verify.sh` como gate binario, reviewer aislado que no ve el
+razonamiento del builder — con la convención de **narración liviana**
+(`emit_delta.sh` estructurado, `decisions/0015-narracion-liviana.md`), no el
+ritual de packet-formal/delta-narrado/review-en-prosa que el propio autor de
+PAIOS abandonó para su trabajo ágil normal (`decisions/0010-ritual-cost-vs-mechanism.md`:
+16 tareas con ritual completo, ~10h; modo rápido desde TASK-017, 37min/feature;
+ninguno de 5 bugs reales lo atrapó el packet/delta/review, todos los atrapó
+tests + verificación real). La razón por la que sí aplica acá: ese mismo ADR
+argumenta que el cálculo se invierte quando no hay un humano aprobando cada
+paso — exactamente el escenario planificador+ejecutor-local+supervisor de
+locagent-ts, a diferencia del solo-operador ágil donde PAIOS resultó lento.
+
+**Construye directamente sobre miro-clone real** — ya tiene PAIOS instalado y
+trackeado (`AGENTS.md`, `contracts/`, `scripts/`, `state/`, 16 tareas
+`TASK-001`..`TASK-016` completas e intactas), no un clon descartable.
+
+**Sin resolver todavía (rastreado acá, no en la ADR de PAIOS):**
+- Traducir el Plan/Step JSON de `eval/planner.py` a un packet de tarea de
+  PAIOS — granularidad: ¿un packet por tarea del corpus, o uno por paso del
+  plan (`TASK-e6-step1`, `TASK-e6-step2`, ...)? Confirmar contra la semántica
+  real de `claim.sh`/`verify.sh`, no asumir.
+- Si `claim.sh`/`verify.sh` necesitan adaptación para un rol builder que
+  corre aislado (`eval/isolated_env.py`, `run_commands` deshabilitado a nivel
+  de tool-schema, MCP solo-`locagent`).
+- Prueba de regresión concreta antes de dar esto por resuelto: la tarea de
+  estrés "opacidad" (rompió el wiring dos veces sin este mecanismo, ver
+  `eval/results/ablation_stress/`) corrida bajo claim→build→judge→review→verify
+  debería atrapar el error en vez de aceptarlo.
+
+**`requirements-eval.txt` pierde `langgraph`/`langgraph-checkpoint-sqlite`/
+`langchain-openai`** — quedan solo `openai`, `python-dotenv`, `numpy`.
+
 ## Pendiente — ideas para después del gate de Stage 1/2 (no comprometidas)
 
+- **Documento de portafolio** (no escrito todavía) que sume los tres módulos
+  que convergieron en esta sesión: GESTADO (estado acotado — `cabezon`), PAIOS
+  (protocolo/verificación — `paios-bootstrap`), locagent-ts (herramientas de
+  navegación de código + selección de modelo/ejecutor). Candidato de ubicación:
+  el rol `chief-of-staff` de `paios-bootstrap/AGENTS.md` ya está pensado como
+  "portafolio (normalmente otro repo o proyección de alto nivel)" — evaluar si
+  es el lugar natural antes de crear un documento nuevo desde cero.
 - **Experimento GESTADO x locagent-ts.** GESTADO (`C:/Users/joz/orca/workspaces/Gestado/cabezon`)
   es un runtime de estado acotado y validado para agentes LLM (fusión
   determinista Σ(t+1) = Σ(t) ⊕ ΔΣ(t), sin transcript persistente) que ataca el
