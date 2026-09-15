@@ -27,6 +27,16 @@ JSON
 else
 rm -f /state/settings/cline_mcp_settings.json
 fi
+if [ "${ENABLE_TGREP_MCP:-0}" = "1" ]; then
+  node -e '
+const fs = require("fs");
+const p = "/state/settings/cline_mcp_settings.json";
+const d = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf8")) : {mcpServers:{}};
+d.mcpServers = d.mcpServers || {};
+d.mcpServers.tgrep = {transport:{type:"stdio",command:"python3",args:["/opt/tgrep_mcp.py"]}};
+fs.writeFileSync(p, JSON.stringify(d));
+'
+fi
 
 # State is recreated per invocation. The local API key is only a marker for
 # LM Studio, and the container receives no planner credential.

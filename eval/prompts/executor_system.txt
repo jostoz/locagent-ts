@@ -26,4 +26,6 @@ DO NOT HAND BACK THE WORK
 
 ALLOWED READ-ONLY SHELL
 - npx tsc, npm test, vitest, git diff/status/rev-parse, grep, sed -n, head,
-  tail, find, ls, and pwd.
+  tail, find, ls, pwd, and the read-only `tgrep_search` tool when it is
+  available. `tgrep_search` is bounded to the repository and may be used for
+  literal or regex discovery; it never edits files.

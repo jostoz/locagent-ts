@@ -102,6 +102,7 @@ def build_cmd(
     max_tokens: int = 8192,
     sandbox_image: Optional[str] = None,
     disable_locagent: bool = False,
+    enable_tgrep: bool = False,
 ) -> List[str]:
     executor_repo = '/workspace' if sandbox_image else repo
     # CLINE resolves to a Windows npm shim on the host. The container has its
@@ -137,6 +138,7 @@ def build_cmd(
             '-e', 'CLINE_BASE_URL',
             '-e', 'CLINE_MAX_TOKENS',
             '-e', f'DISABLE_LOCAGENT_MCP={1 if disable_locagent else 0}',
+            '-e', f'ENABLE_TGREP_MCP={1 if enable_tgrep else 0}',
             sandbox_image,
         # The image entrypoint already executes its own `cline` binary after
         # installing ephemeral config and MCP state.
@@ -165,6 +167,7 @@ def run_once(
     max_tokens: int = 8192,
     sandbox_image: Optional[str] = None,
     disable_locagent: bool = False,
+    enable_tgrep: bool = False,
 ) -> RunResult:
     cmd = build_cmd(provider=provider, model=model, repo=repo, prompt=prompt,
                     system=system, compaction=compaction, thinking=thinking,
@@ -172,7 +175,8 @@ def run_once(
                     data_dir=data_dir, api_key=api_key, base_url=base_url,
                     max_tokens=max_tokens,
                     sandbox_image=sandbox_image,
-                    disable_locagent=disable_locagent)
+                    disable_locagent=disable_locagent,
+                    enable_tgrep=enable_tgrep)
     Path(run_path).parent.mkdir(parents=True, exist_ok=True)
 
     env = dict(os.environ)

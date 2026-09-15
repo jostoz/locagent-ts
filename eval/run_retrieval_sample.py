@@ -73,7 +73,8 @@ def main() -> int:
                 run_path=str(out / f"{condition}-{task}.jsonl"), provider="openai-compatible", model=args.model,
                 system=BASE_SYSTEM + "\n\nRETRIEVAL CONDITION\n" + ROUTING[condition], timeout_s=args.timeout,
                 api_key="lm-studio-local", sandbox_image=args.image,
-                disable_locagent=condition in ("rg", "tgrep"), expect_mcp=condition in ("locagent", "hybrid"))
+                disable_locagent=condition in ("rg", "tgrep"), enable_tgrep=condition in ("tgrep", "hybrid"),
+                expect_mcp=condition in ("locagent", "hybrid"))
             score, correct = score_answer(result.transcript.final_text, record["answer_tokens"])
             row = {"task": task, "condition": condition, "correct": correct, "score": score,
                    "wall_s": result.wall_s, "index_s": index_s, "iterations": result.transcript.iterations,

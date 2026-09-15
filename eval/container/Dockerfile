@@ -13,6 +13,7 @@ RUN echo "2e3de5b7735eb84aa150d3a48e8cff8f27c05795bfccb8b52c9bd8881f7225ce  /tmp
 
 COPY requirements-locagent.txt /tmp/requirements-locagent.txt
 RUN pip3 install --break-system-packages --no-cache-dir -r /tmp/requirements-locagent.txt
+COPY tgrep_mcp.py /opt/tgrep_mcp.py
 
 COPY entrypoint.sh /usr/local/bin/sandboxed-cline
 RUN chmod 0555 /usr/local/bin/sandboxed-cline
