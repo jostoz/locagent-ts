@@ -17,6 +17,11 @@ tgrep no reemplaza el grafo. El router elige la herramienta según la operación
 ## Etapa 1: viabilidad y fidelidad
 
 1. Instalar una versión fijada de microsoft/tgrep y registrar versión, plataforma y opciones del índice.
+   Versión fijada para la primera matriz: `v1.0.8`,
+   `x86_64-pc-windows-msvc`, SHA-256
+   `e29165914e56bba0296d369d1d4ab4c62074711c90bcafaf8d3567f2811515c0`.
+   El digest coincide con el campo `digest` del asset publicado por la API de
+   GitHub Releases. El `checksums.txt` de v1.0.8 no enumera los assets Windows.
 2. Indexar un checkout inmutable y añadir `.tgrep/` al ignore del entorno de prueba.
 3. Comparar tgrep y ripgrep sobre el mismo conjunto de consultas literales y regex.
 4. Exigir igualdad de archivos y líneas encontradas. Registrar por separado diferencias por UTF-8 inválido, límite de 64 MiB, reglas ignore o regex no soportado.

@@ -1,5 +1,8 @@
 # Cloud reasoning-control gate (2026-09-15)
 
+Status: **archived**. Cloud-provider validation is complete for the current
+stage; the active evaluation track is now tgrep vs LocAgent vs hybrid routing.
+
 Executor: `qwen/qwen3.8-27b` through Cline's native `openrouter` provider. All
 cases ran without LocAgent MCP against the repository pinned at `da9acfe`.
 Raw transcripts remain under the ignored `eval/results/` tree.
