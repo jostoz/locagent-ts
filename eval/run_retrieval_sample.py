@@ -42,7 +42,8 @@ def count_search_calls(result) -> dict[str, int]:
     counts = {"tgrep": 0, "rg": 0, "graph": result.transcript.n_graph}
     for call in result.transcript.tool_calls:
         text = json.dumps(call.input, ensure_ascii=False) if not isinstance(call.input, str) else call.input
-        counts["tgrep"] += int("tgrep " in text)
+        name = getattr(call, "name", "")
+        counts["tgrep"] += int("tgrep" in name.lower() or "tgrep " in text)
         counts["rg"] += int("rg " in text or "ripgrep" in text)
     return counts
 
