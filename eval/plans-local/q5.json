@@ -1,0 +1,30 @@
+{
+  "task_id": "q5",
+  "planner_model": "qwen3.8-27b",
+  "task": "Which components render LayerButtons, and on which lines?",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Resolve the LayerButtons entity and find all incoming renders edges to it, recording each rendering component name, file path, and line number.",
+      "target_file": "src/board/toolbars.tsx",
+      "operation": "inspect",
+      "tool": "graph_traverse",
+      "locate_with": [
+        "graph_get:LayerButtons"
+      ],
+      "edit_spec": "Use graph_get to resolve LayerButtons, then traverse reverse/incoming 'renders' edges; for each source component record its name and the line number where it renders <LayerButtons>.",
+      "max_edit_lines": 0,
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      },
+      "_target_is_big": true
+    }
+  ],
+  "final_acceptance": {
+    "type": "none",
+    "cmd": "",
+    "expect": "exit_zero"
+  }
+}

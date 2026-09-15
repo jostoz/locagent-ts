@@ -1,0 +1,61 @@
+{
+  "type": "json_object",
+  "task_id": "q9",
+  "planner_model": "deepseek-reasoner",
+  "task": "Enumerate the format toolbars defined in src/board/toolbars.tsx and what each one is for.",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "List every top-level entity exported/defined in src/board/toolbars.tsx to name each toolbar.",
+      "target_file": "src/board/toolbars.tsx",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:src/board/toolbars.tsx"
+      ],
+      "edit_spec": "Read the file's entity list and record the name of each toolbar component/constant defined here (do not edit anything).",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 2,
+      "goal": "Inspect the body of each toolbar entity to state what each one is for.",
+      "target_file": "src/board/toolbars.tsx",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:src/board/toolbars.tsx"
+      ],
+      "edit_spec": "For each toolbar entity found in step 1, read its props and rendered children to determine its purpose (do not edit anything).",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 3,
+      "goal": "Find where each toolbar is rendered to confirm its role in the board UI.",
+      "target_file": "src/board/toolbars.tsx",
+      "operation": "inspect",
+      "tool": "graph_traverse",
+      "locate_with": [
+        "graph_traverse:src/board/toolbars.tsx"
+      ],
+      "edit_spec": "Traverse incoming 'renders'/'imports' edges for each toolbar entity to see which parent component uses it (do not edit anything).",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    }
+  ],
+  "final_acceptance": {
+    "type": "none",
+    "cmd": "",
+    "expect": "exit_zero"
+  }
+}

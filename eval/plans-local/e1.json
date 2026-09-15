@@ -1,0 +1,30 @@
+{
+  "task_id": "e1",
+  "planner_model": "qwen3.8-27b",
+  "task": "Add an optional `locked?: boolean` field to the StickyNote interface in src/board/useStickyNotes.ts. Optional only -- do not change any behaviour or add a default.",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Insert an optional locked boolean member into the StickyNote interface without changing existing members or behavior.",
+      "target_file": "src/board/useStickyNotes.ts",
+      "operation": "edit",
+      "tool": "editor",
+      "locate_with": [
+        "graph_get:StickyNote"
+      ],
+      "edit_spec": "Locate the declaration of interface StickyNote (including any export keyword). Inside its braces, insert exactly one new member line: `  locked?: boolean;`. Place it after the opening brace and before the closing brace. If other members exist, add this as an additional member without modifying existing lines. Do not add a default value or change any behavior.",
+      "max_edit_lines": 2,
+      "acceptance_check": {
+        "type": "grep",
+        "cmd": "git grep -nF \"locked?: boolean;\" -- src/board/useStickyNotes.ts",
+        "expect": "exit_zero"
+      },
+      "_target_is_big": true
+    }
+  ],
+  "final_acceptance": {
+    "type": "tsc",
+    "cmd": "npx tsc -p tsconfig.app.json --noEmit",
+    "expect": "exit_zero"
+  }
+}

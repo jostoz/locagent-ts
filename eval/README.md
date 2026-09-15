@@ -104,7 +104,10 @@ It does **not** rewrite the jsonl — read the report, edit the file, bump
 `pinned_at` on every touched record. `run_matrix.py` (Stage 1) refuses to
 publish metrics when `pinned_at` ≠ live HEAD.
 
-Current pin: **`da9acfe`**, 0 unresolved / 0 drift / 0 token miss (18/18).
+Current pin: **`da9acfe`**, 0 unresolved / 0 drift / 0 token miss (18/18) when
+checked at that revision. The runner creates its disposable worktrees from this
+commit even if the supplied checkout has moved on; it only needs the commit to
+remain available locally.
 
 ## LM Studio / Windows machinery (Stage 1+, preserved from the scratchpad `eval_*.sh`)
 
@@ -119,6 +122,24 @@ Current pin: **`da9acfe`**, 0 unresolved / 0 drift / 0 token miss (18/18).
 - `free_gb()` guard: pause ~20 s when free RAM < 3500 MB.
 - `resource module not available on Windows` on every `locagent_mcp` import is a
   harmless pre-existing stderr warning.
+
+## Filesystem isolation for edit cases
+
+`cline --cwd` and `--worktree` choose a working directory but do not block a
+Windows process from opening an absolute host path. The matrix therefore refuses
+edit cases unless `--sandbox-image locagent-cline:stage1` is supplied. Build the
+image from `eval/container/` and pass it to the runner:
+
+```
+docker build -t locagent-cline:stage1 eval/container
+python -m eval.run_matrix --repo C:/Users/joz/Documents/miro-clone \
+  --condition both --sandbox-image locagent-cline:stage1
+```
+
+The container has a read-only root filesystem, ephemeral `/state` and `/tmp`, a
+read/write mount only for its disposable worktree at `/workspace`, and a
+read-only LocAgent source mount. It receives the LM Studio marker key only; the
+DeepSeek planner credential is never passed to Cline.
 
 ## What's tracked vs ignored
 

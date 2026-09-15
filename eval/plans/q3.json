@@ -1,0 +1,76 @@
+{
+  "task_id": "q3",
+  "planner_model": "deepseek-reasoner",
+  "task": "Where is the z-order of shapes implemented? Point me at the core function, the per-type wrappers, and the UI buttons.",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Identify the core z-order implementation function(s) in src/board/zorder.ts and report their names, signatures, and line ranges.",
+      "target_file": "src/board/zorder.ts",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:src/board/zorder.ts"
+      ],
+      "edit_spec": "Report all top-level entity names, especially exported functions, with their signatures and line ranges.",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 2,
+      "goal": "Identify the UI buttons/components in src/board/toolbars.tsx responsible for z-order actions (bring forward, send backward, bring to front, send to back).",
+      "target_file": "src/board/toolbars.tsx",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:src/board/toolbars.tsx"
+      ],
+      "edit_spec": "Report entity names and line ranges for any toolbar buttons that trigger z-order changes, including their labels or icon identifiers.",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 3,
+      "goal": "Identify per-type z-order wrapper functions in src/board/useShapes.ts that delegate to the core z-order function.",
+      "target_file": "src/board/useShapes.ts",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:src/board/useShapes.ts"
+      ],
+      "edit_spec": "Report entity names and line ranges for functions that call into zorder.ts or manipulate shape z-order arrays, e.g. bringShapeToFront or sendShapeToBack.",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 4,
+      "goal": "Identify per-type z-order wrapper functions in src/board/useStickyNotes.ts that delegate to the core z-order function.",
+      "target_file": "src/board/useStickyNotes.ts",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:src/board/useStickyNotes.ts"
+      ],
+      "edit_spec": "Report entity names and line ranges for functions that call into zorder.ts or manipulate sticky-note z-order arrays, e.g. bringStickyToFront or sendStickyToBack.",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    }
+  ],
+  "final_acceptance": {
+    "type": "none",
+    "cmd": "",
+    "expect": "exit_zero"
+  }
+}

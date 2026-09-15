@@ -1,0 +1,45 @@
+{
+  "task_id": "q11",
+  "planner_model": "deepseek-reasoner",
+  "task": "Where is fontSizeForText defined, and what does textBoxFontSize pass to it for the height argument?",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Locate the definition of fontSizeForText and confirm it lives in src/slides/textFit.ts.",
+      "target_file": "src/slides/textFit.ts",
+      "operation": "inspect",
+      "tool": "graph_search",
+      "locate_with": [
+        "graph_search:fontSizeForText",
+        "graph_get:fontSizeForText"
+      ],
+      "edit_spec": "",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 2,
+      "goal": "Inspect textBoxFontSize to read the exact height argument it passes into fontSizeForText.",
+      "target_file": "src/slides/textFit.ts",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:textBoxFontSize"
+      ],
+      "edit_spec": "",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    }
+  ],
+  "final_acceptance": {
+    "type": "none",
+    "cmd": "",
+    "expect": "exit_zero"
+  }
+}

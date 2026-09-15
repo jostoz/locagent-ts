@@ -1,0 +1,29 @@
+{
+  "task_id": "e1",
+  "planner_model": "deepseek-reasoner",
+  "task": "Add an optional `locked?: boolean` field to the StickyNote interface in src/board/useStickyNotes.ts. Optional only -- do not change any behaviour or add a default.",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Add an optional `locked?: boolean` member to the `StickyNote` interface in src/board/useStickyNotes.ts without changing existing fields or behavior.",
+      "target_file": "src/board/useStickyNotes.ts",
+      "operation": "edit",
+      "tool": "editor",
+      "locate_with": [
+        "graph_get:StickyNote"
+      ],
+      "edit_spec": "In the `interface StickyNote` declaration, add the line `  locked?: boolean;` as a new member. Place it immediately before the closing `}` of that interface (or after the last existing property), preserving all existing lines exactly.",
+      "max_edit_lines": 2,
+      "acceptance_check": {
+        "type": "grep",
+        "cmd": "if (Select-String -Path src/board/useStickyNotes.ts -Pattern 'locked\\?: boolean' -Quiet) { exit 0 } else { exit 1 }",
+        "expect": "exit_zero"
+      }
+    }
+  ],
+  "final_acceptance": {
+    "type": "tsc",
+    "cmd": "npx tsc -p tsconfig.app.json --noEmit",
+    "expect": "exit_zero"
+  }
+}

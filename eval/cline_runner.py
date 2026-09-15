@@ -58,7 +58,7 @@ class RunResult:
     transcript: Transcript
     exit_code: int
     wall_s: float
-    flake: str = 'ok'             # ok | conn | timeout | mcp | no-tools
+    flake: str = 'ok'             # ok | conn | timeout | mcp | no-tools | container | process
     attempts: int = 1
     stderr_tail: str = ''
 
@@ -71,6 +71,10 @@ def _classify_flake(tr: Transcript, exit_code: int, killed: bool,
                     expect_mcp: bool) -> str:
     if killed:
         return 'timeout'
+    if exit_code == 125:
+        return 'container'
+    if exit_code != 0:
+        return 'process'
     if tr.connection_flake:
         return 'conn'
     if expect_mcp and tr.n_graph == 0 and any(
@@ -92,17 +96,51 @@ def build_cmd(
     compaction: str = 'agentic',
     thinking: str = 'none',
     timeout_s: int = DEFAULT_TIMEOUT,
+    data_dir: Optional[str] = None,
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+    max_tokens: int = 8192,
+    sandbox_image: Optional[str] = None,
+    disable_locagent: bool = False,
 ) -> List[str]:
-    cmd = [
-        CLINE, '-P', provider, '-m', model, '-c', repo,
+    executor_repo = '/workspace' if sandbox_image else repo
+    # CLINE resolves to a Windows npm shim on the host. The container has its
+    # own Linux installation, so never forward that host-only executable path.
+    cmd = ['cline' if sandbox_image else CLINE]
+    if data_dir:
+        cmd += ['--data-dir', data_dir]
+    cmd += [
+        '--json', prompt, '-P', provider, '-m', model, '-c', executor_repo,
         '--thinking', thinking, '--auto-approve', 'true',
-        '--compaction', compaction, '--json',
+        '--compaction', compaction,
     ]
+    if api_key:
+        cmd += ['-k', api_key]
     if timeout_s:
         cmd += ['-t', str(timeout_s)]
     if system:
         cmd += ['-s', system]
-    cmd.append(prompt)
+    if sandbox_image:
+        # Docker is the filesystem boundary. Only the disposable worktree and
+        # read-only LocAgent code are mounted; no host home, source checkout,
+        # credentials, Docker socket, or evaluator output directory is visible.
+        cmd = [
+            'docker', 'run', '--rm', '--read-only',
+            '--tmpfs', '/tmp:rw,noexec,nosuid,size=1g',
+            '--tmpfs', '/state:rw,noexec,nosuid,size=64m',
+            '--mount', f'type=bind,source={Path(repo).resolve()},target=/workspace',
+            '--mount', r'type=bind,source=C:\Users\joz\orca\projects\locagent-ts,target=/opt/locagent,readonly',
+            '--add-host', 'host.docker.internal:host-gateway',
+            '-e', f'CLINE_MODEL={model}',
+            '-e', f'CLINE_PROVIDER={provider}',
+            '-e', 'CLINE_API_KEY',
+            '-e', 'CLINE_BASE_URL',
+            '-e', 'CLINE_MAX_TOKENS',
+            '-e', f'DISABLE_LOCAGENT_MCP={1 if disable_locagent else 0}',
+            sandbox_image,
+        # The image entrypoint already executes its own `cline` binary after
+        # installing ephemeral config and MCP state.
+        ] + cmd[1:]
     return cmd
 
 
@@ -117,15 +155,30 @@ def run_once(
     model: str = lmstudio.MODEL_9B,
     system: Optional[str] = None,
     compaction: str = 'agentic',
+    thinking: str = 'none',
     step: Optional[int] = None,
     timeout_s: int = DEFAULT_TIMEOUT,
     expect_mcp: bool = True,
+    data_dir: Optional[str] = None,
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+    max_tokens: int = 8192,
+    sandbox_image: Optional[str] = None,
+    disable_locagent: bool = False,
 ) -> RunResult:
     cmd = build_cmd(provider=provider, model=model, repo=repo, prompt=prompt,
-                    system=system, compaction=compaction, timeout_s=timeout_s)
+                    system=system, compaction=compaction, thinking=thinking,
+                    timeout_s=timeout_s,
+                    data_dir=data_dir, api_key=api_key, base_url=base_url,
+                    max_tokens=max_tokens,
+                    sandbox_image=sandbox_image,
+                    disable_locagent=disable_locagent)
     Path(run_path).parent.mkdir(parents=True, exist_ok=True)
 
     env = dict(os.environ)
+    env['CLINE_API_KEY'] = api_key or 'lm-studio-local'
+    env['CLINE_BASE_URL'] = base_url or 'http://host.docker.internal:11434/v1'
+    env['CLINE_MAX_TOKENS'] = str(max_tokens)
     env.setdefault('PATH', '')
     for extra in (r'C:\Users\joz\AppData\Roaming\npm', r'C:\Users\joz\.lmstudio\bin'):
         if extra.lower() not in env['PATH'].lower():
@@ -206,6 +259,8 @@ if __name__ == '__main__':
     ap.add_argument('--compaction', default='agentic')
     ap.add_argument('--timeout', type=int, default=DEFAULT_TIMEOUT)
     ap.add_argument('--run-path', default='eval/results/_adhoc.jsonl')
+    ap.add_argument('--data-dir', help='isolated Cline data directory')
+    ap.add_argument('--api-key', help='per-run provider key (for local servers, any marker)')
     ap.add_argument('--retry', action='store_true')
     args = ap.parse_args()
 
@@ -217,6 +272,10 @@ if __name__ == '__main__':
     kw = dict(task_id='_adhoc', condition='_adhoc', prompt=args.prompt,
               repo=args.repo, run_path=args.run_path, provider=args.provider,
               system=sys_prompt, compaction=args.compaction, timeout_s=args.timeout)
+    if args.data_dir:
+        kw['data_dir'] = args.data_dir
+    if args.api_key:
+        kw['api_key'] = args.api_key
     r = run_with_retry(model=args.model, **kw) if args.retry else run_once(model=args.model, **kw)
     tr = r.transcript
     print(json.dumps({

@@ -1,0 +1,48 @@
+{
+  "task_id": "e5",
+  "planner_model": "qwen3.8-27b",
+  "task": "In src/board/toolbars.tsx, add an optional `title?: string` prop to LayerButtons (destructured in its parameter object, defaulting to 'Layer'), and pass `title=\"Ordenar\"` at the LayerButtons call site inside ShapeFormatToolbar.",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Locate the LayerButtons definition and its call site inside ShapeFormatToolbar in src/board/toolbars.tsx.",
+      "target_file": "src/board/toolbars.tsx",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:LayerButtons",
+        "graph_get:ShapeFormatToolbar"
+      ],
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      },
+      "_target_is_big": true
+    },
+    {
+      "n": 2,
+      "goal": "Add the optional title prop to LayerButtons and pass title=\"Ordenar\" at the ShapeFormatToolbar call site.",
+      "target_file": "src/board/toolbars.tsx",
+      "operation": "edit",
+      "tool": "editor",
+      "locate_with": [
+        "graph_get:LayerButtons",
+        "graph_get:ShapeFormatToolbar"
+      ],
+      "edit_spec": "In the LayerButtons definition, add `title?: string` to its props type (or inline parameter object type) and destructure it as `title = 'Layer'`. Use the destructured value in the component body so it is not unused; if a literal `'Layer'` label exists, replace that usage with `{title}`, otherwise insert `void title;` immediately after the destructuring. In the ShapeFormatToolbar component, find the `<LayerButtons` JSX call and add the attribute `title=\"Ordenar\"` to that element only.",
+      "max_edit_lines": 10,
+      "acceptance_check": {
+        "type": "grep",
+        "cmd": "if ((Select-String -Path src/board/toolbars.tsx -Pattern \"title\\?: string\" | Measure-Object).Count -ge 1 -and (Select-String -Path src/board/toolbars.tsx -Pattern \"title = 'Layer'\" | Measure-Object).Count -ge 1 -and (Select-String -Path src/board/toolbars.tsx -Pattern 'title=\"Ordenar\"' | Measure-Object).Count -ge 1) { exit 0 } else { exit 1 }",
+        "expect": "exit_zero"
+      },
+      "_target_is_big": true
+    }
+  ],
+  "final_acceptance": {
+    "type": "tsc",
+    "cmd": "npx tsc -p tsconfig.app.json --noEmit",
+    "expect": "exit_zero"
+  }
+}

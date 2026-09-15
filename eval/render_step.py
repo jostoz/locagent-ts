@@ -53,6 +53,8 @@ def render(plan: dict, step_n: int, carry: Optional[List[dict]] = None) -> str:
     parts = [
         f"PLAN STEP {step_n} of {len(steps)}  --  task {plan.get('task_id')}",
         '',
+        f"TASK CONTEXT: {plan.get('task', '')}",
+        '',
         f"GOAL: {step.get('goal')}",
         f"TARGET FILE: {step.get('target_file')}  (operation: {step.get('operation')})",
         f"TOOL: {step.get('tool')}",

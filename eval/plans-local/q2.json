@@ -1,0 +1,28 @@
+{
+  "task_id": "q2",
+  "planner_model": "qwen3.8-27b",
+  "task": "Where is the core z-order reorder function defined? Give the file and the starting line.",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Identify the core z-order reorder function in src/board/zorder.ts and record its file path and starting line.",
+      "target_file": "src/board/zorder.ts",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:src/board/zorder.ts"
+      ],
+      "edit_spec": "No edit; inspect the module and report the exported function that reorders z-order, including its 1-based starting line.",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    }
+  ],
+  "final_acceptance": {
+    "type": "none",
+    "cmd": "",
+    "expect": "exit_zero"
+  }
+}

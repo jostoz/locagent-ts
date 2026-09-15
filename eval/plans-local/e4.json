@@ -1,0 +1,47 @@
+{
+  "task_id": "e4",
+  "planner_model": "qwen3.8-27b",
+  "task": "In src/board/Board.tsx, the toolbarButtonStyle helper (~line 4906) returns a CSSProperties object. Add `transition: 'background 120ms ease'` to that returned object. Nothing else.",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Locate the toolbarButtonStyle helper and its returned CSSProperties object in src/board/Board.tsx.",
+      "target_file": "src/board/Board.tsx",
+      "operation": "inspect",
+      "tool": "graph_search",
+      "locate_with": [
+        "graph_get:toolbarButtonStyle"
+      ],
+      "edit_spec": "",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      },
+      "_target_is_big": true
+    },
+    {
+      "n": 2,
+      "goal": "Add the transition property to the CSSProperties object returned by toolbarButtonStyle.",
+      "target_file": "src/board/Board.tsx",
+      "operation": "edit",
+      "tool": "editor",
+      "locate_with": [
+        "graph_get:toolbarButtonStyle"
+      ],
+      "edit_spec": "Anchored to the named symbol `toolbarButtonStyle` in src/board/Board.tsx, find the CSSProperties object literal that is assigned or returned by that helper (near line 4906). Insert exactly one new property as the first member inside that object's opening brace: `transition: 'background 120ms ease',`. Preserve existing indentation and do not change any other code.",
+      "max_edit_lines": 2,
+      "acceptance_check": {
+        "type": "grep",
+        "cmd": "if (-not (Select-String -Path src/board/Board.tsx -Pattern \"transition: 'background 120ms ease'\" -Quiet)) { exit 1 }",
+        "expect": "exit_zero"
+      },
+      "_target_is_big": true
+    }
+  ],
+  "final_acceptance": {
+    "type": "tsc",
+    "cmd": "npx tsc -p tsconfig.app.json --noEmit",
+    "expect": "exit_zero"
+  }
+}

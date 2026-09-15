@@ -1,0 +1,60 @@
+{
+  "type": "json_object",
+  "task_id": "e3",
+  "planner_model": "deepseek-reasoner",
+  "task": "Add optional `locked?: boolean` to BoardShape in src/board/useShapes.ts. Create src/board/lockGuard.ts exporting `export function isLocked(item: { locked?: boolean }): boolean { return item.locked === true }`. Then import isLocked in useShapes.ts and use it inside reorderShapes so that ids belonging to a locked shape are dropped from the set passed to reorder().",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Create src/board/lockGuard.ts containing exactly the isLocked helper export.",
+      "target_file": "src/board/lockGuard.ts",
+      "operation": "create",
+      "tool": "editor",
+      "locate_with": [],
+      "edit_spec": "Create the file with exactly this content (three lines, no imports, no other exports):\nexport function isLocked(item: { locked?: boolean }): boolean {\n  return item.locked === true\n}",
+      "acceptance_check": {
+        "type": "grep",
+        "cmd": "powershell -NoProfile -Command \"if (-not (Select-String -Path src/board/lockGuard.ts -Pattern 'export function isLocked')) { exit 1 }\"",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 2,
+      "goal": "Inspect src/board/useShapes.ts to name the exact import block, the reorderShapes symbol, and the expression passed to reorder().",
+      "target_file": "src/board/useShapes.ts",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:reorderShapes",
+        "graph_get:useShapes"
+      ],
+      "edit_spec": "Read the whole file (it is small). Report: (a) the exact line of the last top-level import statement; (b) the exact signature line of `reorderShapes`; (c) the exact expression/argument currently passed into the `reorder(` call inside `reorderShapes`, and the name of the shapes array or id lookup available in that scope (e.g. `shapes`, `items`, `shapesRef.current`). Do not edit anything.",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 3,
+      "goal": "Add the optional BoardShape.locked field, import isLocked, and filter locked ids out before reorder() is called inside reorderShapes.",
+      "target_file": "src/board/useShapes.ts",
+      "operation": "edit",
+      "tool": "editor",
+      "locate_with": [
+        "graph_get:reorderShapes"
+      ],
+      "edit_spec": "Two anchored edits. (1) Immediately AFTER the last existing top-level `import ... from '...'` line at the top of the file, insert a new line: `import { isLocked } from './lockGuard'`. (2) Inside the function `reorderShapes`, immediately BEFORE the existing `reorder(` call, insert a filter that drops ids belonging to locked shapes, then pass the filtered value to `reorder(` instead of the original expression. Use the existing id-collection expression that is currently passed to `reorder(` (call it IDS) and the shape lookup already in scope in that function (call it LOOKUP, i.e. the array of shape objects such as `shapes` / `shapesRef.current`): insert `const unlockedIds = IDS.filter((id) => { const shape = LOOKUP.find((s) => s.id === id); return !(shape && isLocked(shape)); });` and change the argument of `reorder(` from IDS to `unlockedIds`. Preserve all existing indentation and do not otherwise modify reorderShapes.",
+      "acceptance_check": {
+        "type": "grep",
+        "cmd": "powershell -NoProfile -Command \"if (-not (Select-String -Path src/board/useShapes.ts -Pattern 'lockGuard')) { exit 1 }; if (-not (Select-String -Path src/board/useShapes.ts -Pattern 'isLocked')) { exit 1 }\"",
+        "expect": "exit_zero"
+      }
+    }
+  ],
+  "final_acceptance": {
+    "type": "tsc",
+    "cmd": "npx tsc --noEmit",
+    "expect": "exit_zero"
+  }
+}

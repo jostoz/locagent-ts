@@ -1,0 +1,81 @@
+{
+  "task_id": "qC1",
+  "planner_model": "qwen3.8-27b",
+  "task": "In this board's code, how is a plain text box told apart from a sticky note / post-it? Point me at the check and the files that rely on it.",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Name the exact condition or predicate in Board rendering that distinguishes a plain text box from a sticky note/post-it.",
+      "target_file": "src/board/Board.tsx",
+      "operation": "inspect",
+      "tool": "graph_search",
+      "locate_with": [
+        "graph_get:Board"
+      ],
+      "edit_spec": "Search for shape type discriminators such as 'text', 'stickyNote', 'post-it', or isStickyNote and report the check.",
+      "max_edit_lines": 0,
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      },
+      "_target_is_big": true
+    },
+    {
+      "n": 2,
+      "goal": "Name any exported helper, constant, or type guard in useStickyNotes that implements or names the sticky-note discriminator.",
+      "target_file": "src/board/useStickyNotes.ts",
+      "operation": "inspect",
+      "tool": "graph_search",
+      "locate_with": [
+        "graph_get:useStickyNotes"
+      ],
+      "edit_spec": "Search for exported predicates, constants, or type guards related to sticky notes and report the symbol name.",
+      "max_edit_lines": 0,
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      },
+      "_target_is_big": true
+    },
+    {
+      "n": 3,
+      "goal": "Name all files that import or invoke the identified check/helper so they can be reported as relying on it.",
+      "target_file": "src/board/useStickyNotes.ts",
+      "operation": "inspect",
+      "tool": "graph_traverse",
+      "locate_with": [
+        "graph_get:useStickyNotes"
+      ],
+      "edit_spec": "Traverse importers and callers of the sticky-note helper/check identified in steps 1-2 and list repo-relative file paths.",
+      "max_edit_lines": 0,
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      },
+      "_target_is_big": true
+    },
+    {
+      "n": 4,
+      "goal": "Name converter functions that branch on the same text-versus-sticky-note discriminator.",
+      "target_file": "src/lib/content-converters.ts",
+      "operation": "inspect",
+      "tool": "graph_search",
+      "locate_with": [],
+      "edit_spec": "Search for shape type checks or sticky-note handling in content conversion functions and report the relying symbols.",
+      "max_edit_lines": 0,
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    }
+  ],
+  "final_acceptance": {
+    "type": "none",
+    "cmd": "",
+    "expect": "exit_zero"
+  }
+}

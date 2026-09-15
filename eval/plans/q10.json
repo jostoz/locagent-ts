@@ -1,0 +1,44 @@
+{
+  "task_id": "q10",
+  "planner_model": "deepseek-reasoner",
+  "task": "Where is the pure z-order array algorithm and its helper arraysEqual defined?",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Inspect src/board/zorder.ts to name the pure z-order array algorithm entity and confirm it lives in this file.",
+      "target_file": "src/board/zorder.ts",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:src/board/zorder.ts"
+      ],
+      "edit_spec": "",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 2,
+      "goal": "Confirm that the helper arraysEqual is defined in src/board/zorder.ts by grepping for its declaration.",
+      "target_file": "src/board/zorder.ts",
+      "operation": "inspect",
+      "tool": "graph_search",
+      "locate_with": [
+        "graph_search:arraysEqual"
+      ],
+      "edit_spec": "",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    }
+  ],
+  "final_acceptance": {
+    "type": "none",
+    "cmd": "",
+    "expect": "exit_zero"
+  }
+}

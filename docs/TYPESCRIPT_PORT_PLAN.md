@@ -176,9 +176,12 @@ localización de código para un agente con ventana de contexto chica (qwen-2.5-
 Cline) sobre un codebase TS/React con archivos gigantes, frente a: sin retrieval, la
 búsqueda nativa del agente, y retrieval por LSP (Serena)?
 
-**Condiciones:** (a) qwen-Cline sin retrieval · (b) + `search_codebase` nativo · (c) +
-LocAgent-TS MCP · (d) + Serena.
+**Condiciones:** (a) qwen-Cline sin retrieval · (b) + `search_codebase`/ripgrep nativo ·
+(c) + LocAgent-TS MCP · (d) + Serena · (e) + tgrep indexado · (f) router híbrido
+tgrep + LocAgent-TS.
 **Ablations de (c):** sin edge `renders`; sin `invokes`; solo BM25 vs BM25 + fuzzy + `graph_traverse`.
+**Ablations de (f):** tgrep primero para consulta literal vs grafo primero para intención;
+índice caliente vs `--no-index`; presupuesto máximo de llamadas por etapa.
 
 **Métricas:** acc@k y recall@k a nivel archivo y a nivel función/entidad, k ∈ {1, 3, 5, 10}.
 Nota: reimplementar acc@k / recall@k **sin `torch`** — las de `evaluation/eval_metric.py`
@@ -197,7 +200,8 @@ autor → mitigar con un criterio de relevancia escrito y, de ser posible, doble
 
 **Artefactos cuando se retome:** `docs/PAPER.md` (o LaTeX), `eval/` (harness + `.jsonl` +
 métrica torch-free + runner), tablas/figuras. Related work a cubrir: LocAgent (ACL 2025),
-Serena / agentes sobre LSP, Aider repo-map, herramientas de grafo de código sobre tree-sitter.
+Serena / agentes sobre LSP, Aider repo-map, herramientas de grafo de código sobre tree-sitter,
+y búsqueda léxica indexada por trigramas (microsoft/tgrep y Zoekt).
 
 **Esfuerzo estimado:** etiquetado + harness ~2-3 días; corridas de las 4 condiciones +
 ablations ~2 días; redacción ~1 semana.
@@ -552,6 +556,12 @@ el commit `a2d0d44`; el corpus quedó re-pineado contra un checkout limpio de
 sucio con residuos de la sesión fallida del post-mortem).
 
 ## Stage 2 — decidido: PAIOS como protocolo, no LangGraph (2026-09-11)
+
+**Paso previo añadido (2026-09-15):** ejecutar la evaluación tgrep/LocAgent descrita en
+`eval/TGREP_HYBRID_PLAN.md`. Stage 2 puede implementar la interfaz del router, pero tgrep
+no se convierte en dependencia obligatoria hasta superar el gate. Si lo supera, el rol
+explorador usa tgrep para texto/regex y LocAgent para intención y relaciones; cada packet
+registra herramienta, fallback, latencia, resultados y frescura del índice.
 
 **Decisión tomada y documentada en `paios-bootstrap/decisions/0018-integracion-locagent-ts-stage2.md`
 — no se re-deriva el razonamiento acá, solo el resumen ejecutable.**
