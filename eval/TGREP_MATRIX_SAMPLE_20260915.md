@@ -26,3 +26,17 @@ integration.
 This is a feasibility sample, not an adoption gate: one repetition over four
 tasks cannot establish a statistically stable winner. Repeat the four conditions
 over the full localization corpus, then include edit cases and index freshness.
+
+## Explicit MCP rerun
+
+The follow-up build exposed `tgrep_search` as an MCP tool and the hybrid smoke
+used it together with LocAgent. The full rerun was intentionally stopped by the
+GPU watchdog when free VRAM reached 994 MiB against the 1,024 MiB floor. The
+partial results are retained as diagnostics only: `rg` completed 4/4, and tgrep
+completed `q1`, `q3`, and `q4` at 26.7 s, 48.0 s, and 30.8 s respectively, all
+correct, with 2, 3, and 2 explicit tgrep MCP calls. No incomplete condition is
+used for an adoption decision.
+
+The next run should use a smaller context or a larger VRAM margin and execute in
+batches. It must finish all four conditions before comparing the real hybrid
+router against the earlier prompt-only sample.
