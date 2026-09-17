@@ -634,22 +634,46 @@ trackeado (`AGENTS.md`, `contracts/`, `scripts/`, `state/`, 16 tareas
   local en la matriz de Stage 1 (hoy: DeepSeek API) o como planificador local
   de respaldo sin depender de una API paga.
 
+## v6 (2026-09-16) — precisión de aristas, contexto React e invalidación incremental
+
+**Precisión.** `fuzzy_search` pasa a **default `False`**: `invokes`/`renders`/`inherits` se resuelven solo por binding de import (nivel 1) o por los archivos que el caller importa (nivel 2). El fallback global (nivel 3) queda opt-in (`--fuzzy`, `LOCAGENT_FUZZY=1`) y **con gate**: solo entidades exportadas (`is_exported`) y solo cuando el nombre no lo comparten más de `_MAX_UNBOUND_FANOUT` (6) entidades. Medido en DeskcommCRM (3 062 archivos): 294 753 aristas `invokes` con el fallback sin gate → 11 069 con gate → 10 365 sin fallback, para 9 297 funciones. Muestreo de las aristas que se pierden al apagar el fallback: producción → *test doubles* (`FakeQB.update`, `chain.get`, `y`), 100% ruido en las 12 muestreadas. En miro-clone: `invokes` 771 → 720, `renders` 142 → 142 (intactas), 72 con sitios de props.
+
+**Bug de resolución de alias (encontrado midiendo).** `_strip_jsonc` usaba regex y comía el `/*` dentro del glob `"**/*.ts"` del `include` — es decir, **cualquier tsconfig de Next.js** — truncando el JSON y perdiendo `compilerOptions.paths` en silencio: DeskcommCRM resolvía **0** alias y sus aristas `imports` eran 2 436 (solo relativos). Ahora es un escáner string-aware, soporta la cadena `extends` (padre primero, hijo gana) y resuelve `baseUrl` contra el directorio del tsconfig que lo declara. Tras el fix: `imports` 12 179 y `renders` 2 259 con el fallback apagado (antes: 5 010 `invokes`/454 `renders`), o sea el fix **recupera** recall en lugar de solo limpiar ruido.
+
+**Contexto React (Nivel 4, mitad que faltaba).** Nodos `context` (`const Ctx = createContext(...)`, también `React.createContext`) y dos aristas nuevas: `consumes_context` (componente/hook → contexto, desde `useContext(Ctx)`, con `call_lines`) y `provides_context` (componente → contexto, desde `<Ctx.Provider value={...}>`, con `jsx_lines` + el `value` bindeado colapsado). Capturas nuevas en `queries/typescript.scm` con predicados `#eq?` cubriendo las formas `useContext(...)`/`React.useContext(...)`. De paso: `_jsx_tag_parts` — la gramática tsx 2023 parsea `member_expression` de un tag JSX con hijos posicionales y **sin** fields, así que `<Foo.Bar/>` nunca generaba arista; ahora se resuelve por posición. Verificado en un repo que sí usa context (`v0-airbnb-experiences/niche-pivot-handoff`): 6 nodos, 6 `consumes_context`, 6 `provides_context`, con `value=contextValue` capturado. **miro-clone no usa `createContext`/`useContext` en absoluto** — el corpus de la tesis no puede medir esta feature; el smoke la verifica aparte.
+
+**Invalidación incremental.** `scan_sources()` (DFS con `os.scandir`, `mtime_ns` + tamaño — nanosegundos porque un agente edita y pregunta dentro del mismo segundo) y `patch_ts_graph(graph, repo, changed)`. Clausura del refresh: `changed` ∪ todo archivo con una arista **hacia** los nodos cambiados, excluyendo nodos directorio (un directorio en el conjunto arrastraba a todos sus hermanos — bug real, ver abajo). Solo se re-parsean los archivos cambiados: los atributos de derivación (`_calls`/`_renders`/`_heritage`/`_contexts`/`_provides`) y la lista de imports por archivo se retienen en el grafo, así que recomputar un importador no cuesta parseo. El MCP refresca en cada tool call y marca el BM25 como sucio (se reconstruye en el próximo `graph_search`, no en el camino de edición).
+
+| caso | patch | rebuild | speedup |
+|---|---:|---:|---:|
+| miro-clone (112 archivos), edición hoja | **33 ms** | 0.86 s | 26× |
+| miro-clone, edición de hub (`lib/utils.ts`) | **174 ms** | 0.54 s | 3× |
+| DeskcommCRM (3 062), edición hoja | **73 ms** | 11.0 s | 150× |
+| DeskcommCRM, edición de hub (`ui/button.tsx`) | **306 ms** | 10.8 s | 35× |
+
+Escaneo de frescura: 4-5 ms (miro) / 93-106 ms (DeskcommCRM) por tool call. Smoke por stdio real: edición a mitad de sesión visible en **27 ms**, entidad nueva resoluble y arista `invokes` del archivo nuevo presente **sin reiniciar** el server.
+
+**Regresión permanente:** `python -m dependency_graph.ts_patch_check` — 6 casos de edición (añadir export+call, cambio de props, borrado, archivo nuevo, rename de contexto, batch multi-archivo) y cada uno compara el grafo parcheado contra un rebuild completo, nodo por nodo y arista anotada por arista anotada. Verificado que **falla** (3/6) si se quita la exclusión de directorios de la clausura.
+
+**Caveats nuevos:** el coste del patch es proporcional al *fan-in inverso* del archivo editado (hub = cientos de ms, no ms); el BM25 se reconstruye entero en el próximo `graph_search` (0.5 s miro / ~4 s DeskcommCRM) — diferido a propósito; el modo `--fuzzy` no es parcheable (el name-match global rompe la clausura → rebuild); `patch_ts_graph` exige `fuzzy_search=False`.
+
 ## Riesgos / caveats
 
-- **`invokes` es heurístico por nombre** (sin tipos) — más ruidoso en TS. v2 híbrida posible: MCP llama a `tsserver` para `references` (vía `solidlsp` de Serena), tree-sitter para estructura. Ver sección "Serena" arriba.
+- **`invokes` es heurístico por nombre** (sin tipos) — más ruidoso en TS. Desde v6 está acotado por binding de import (default) con fallback global gateado; el salto a tipos reales sigue siendo el híbrido con `tsserver`/`solidlsp`.
 - **Convenciones a nivel-valor** (`x === undefined` = modo Y) no son aristas — mitigado parcialmente por el campo comentario del BM25 (v4); ver sección arriba.
 - **Prompts de LocAgent** (`util/prompts/*.j2`) mencionan idioms Python → edición ligera.
 - **Repo research, no librería mantenida** → asperezas de setup.
-- **Barrels/re-exports y monorepos**: cola larga más allá del v1.
-- Esfuerzo: **~1 semana v1** (Fases 0-3) — **hecho y commiteado**. Lo que resta es el paper (Fase 4, diferida).
+- **Barrels/re-exports y monorepos**: cola larga más allá del v1. En v6 el resolver arregló `extends`/JSONC, pero un import que atraviesa un barrel sigue sin resolver a la entidad concreta (el edge cae a nivel archivo).
+- **React context**: soportado (v6) vía nodos `context` y aristas `consumes_context`/`provides_context`; lo que no hay es *prop drilling* ni hooks de estado (useState/useReducer) como aristas.
+- Esfuerzo: **~1 semana v1** (Fases 0-3) — **hecho y commiteado**. v6 (2026-09-16) es trabajo incremental sobre eso. Lo que resta es el paper (Fase 4, diferida).
 
 ## Archivos
 
-**Nuevos:** `dependency_graph/ts_build_graph.py`, `dependency_graph/queries/typescript.scm`, `dependency_graph/queries/tsx.scm`, `dependency_graph/ts_resolver.py`, `dependency_graph/ts_bm25.py`, `plugins/location_tools/utils/compress_file_ts.py`, `locagent_mcp.py`, `requirements-ts.txt`, `NOTICE`, `docs/omp/` (plantillas `mcp.json` + `RULES.md` + `README.md` para OMP), `eval/miro_clone_localization.jsonl` _(Fase 4, diferido)_
+**Nuevos:** `dependency_graph/ts_build_graph.py`, `dependency_graph/queries/typescript.scm`, `dependency_graph/queries/tsx.scm`, `dependency_graph/ts_resolver.py`, `dependency_graph/ts_bm25.py`, `dependency_graph/ts_patch_check.py` (chequeo de equivalencia patch↔rebuild), `plugins/location_tools/utils/compress_file_ts.py`, `locagent_mcp.py`, `requirements-ts.txt`, `NOTICE`, `docs/omp/` (plantillas `mcp.json` + `RULES.md` + `README.md` para OMP), `eval/miro_clone_localization.jsonl` _(Fase 4, diferido)_
 
 **Fuera del repo:** `C:/Users/joz/Documents/miro-clone/.omp/{mcp.json,RULES.md}` (config OMP del proyecto real, sin versionar acá)
 
-**Modificados:** `dependency_graph/build_graph.py` (`VALID_EDGE_TYPES` += `renders`; `matplotlib` a import lazy), `dependency_graph/traverse_graph.py` (`is_test_file` convención JS/TS; `global_name_dict` no-`.py`), `plugins/__init__.py` + `plugins/location_tools/__init__.py` (harness import opcional), `README.md`, `util/prompts/*.j2` (ligero), `~/.cline/data/settings/cline_mcp_settings.json`
+**Modificados:** `dependency_graph/build_graph.py` (`VALID_EDGE_TYPES` += `renders`, `consumes_context`, `provides_context`; `VALID_NODE_TYPES` += `context`; `matplotlib` a import lazy), `dependency_graph/traverse_graph.py` (`is_test_file` convención JS/TS; `global_name_dict` no-`.py`; `_edge_annot` para las aristas de contexto), `dependency_graph/ts_bm25.py` (indexa nodos `context` con hint), `dependency_graph/ts_resolver.py` (JSONC string-aware + `extends` + `baseUrl` por config), `plugins/__init__.py` + `plugins/location_tools/__init__.py` (harness import opcional), `README.md`, `util/prompts/*.j2` (ligero), `~/.cline/data/settings/cline_mcp_settings.json`
 
 **Reutilizados sin cambios:** `plugins/location_tools/retriever/fuzzy_retriever.py`, `repo_index/codeblocks/parser/*` (referencia), `evaluation/eval_metric.py`
 

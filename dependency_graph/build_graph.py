@@ -14,6 +14,10 @@ NODE_TYPE_DIRECTORY = 'directory'
 NODE_TYPE_FILE = 'file'
 NODE_TYPE_CLASS = 'class'
 NODE_TYPE_FUNCTION = 'function'
+# TS/TSX port: a React context object (`const BoardContext = createContext(...)`).
+# A first-class node so `useContext(BoardContext)` / `<BoardContext.Provider>` can
+# be edges rather than a name that appears in two unrelated files.
+NODE_TYPE_CONTEXT = 'context'
 EDGE_TYPE_CONTAINS = 'contains'
 EDGE_TYPE_INHERITS = 'inherits'
 EDGE_TYPE_INVOKES = 'invokes'
@@ -21,10 +25,16 @@ EDGE_TYPE_IMPORTS = 'imports'
 # TS/TSX port: UI analogue of `invokes` -- a component rendering another component
 # via a JSX tag. Added here so traversal/tools treat it like any other edge type.
 EDGE_TYPE_RENDERS = 'renders'
+# TS/TSX port: React context flow. `consumes_context` -- component -> context it
+# reads via useContext(); `provides_context` -- component -> context it supplies
+# via <Ctx.Provider>. Both carry site lines (and the Provider's bound props).
+EDGE_TYPE_CONSUMES_CONTEXT = 'consumes_context'
+EDGE_TYPE_PROVIDES_CONTEXT = 'provides_context'
 
-VALID_NODE_TYPES = [NODE_TYPE_DIRECTORY, NODE_TYPE_FILE, NODE_TYPE_CLASS, NODE_TYPE_FUNCTION]
+VALID_NODE_TYPES = [NODE_TYPE_DIRECTORY, NODE_TYPE_FILE, NODE_TYPE_CLASS, NODE_TYPE_FUNCTION,
+                    NODE_TYPE_CONTEXT]
 VALID_EDGE_TYPES = [EDGE_TYPE_CONTAINS, EDGE_TYPE_INHERITS, EDGE_TYPE_INVOKES, EDGE_TYPE_IMPORTS,
-                    EDGE_TYPE_RENDERS]
+                    EDGE_TYPE_RENDERS, EDGE_TYPE_CONSUMES_CONTEXT, EDGE_TYPE_PROVIDES_CONTEXT]
 
 SKIP_DIRS = ['.github', '.git']
 def is_skip_dir(dirname):

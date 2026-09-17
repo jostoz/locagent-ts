@@ -18,29 +18,44 @@ a Model Context Protocol (MCP) server so the graph-guided retrieval tools can
 be used from MCP clients such as Cline.
 
 New files:
-  dependency_graph/ts_build_graph.py        - tree-sitter graph builder for .ts/.tsx/.js/.jsx
+  dependency_graph/ts_build_graph.py        - tree-sitter graph builder for .ts/.tsx/.js/.jsx,
+                                              plus patch_ts_graph() incremental refresh
   dependency_graph/ts_resolver.py           - TS/TSX module + path-alias import resolution
+                                              (JSONC tsconfig, extends chain, baseUrl)
   dependency_graph/ts_bm25.py               - self-contained BM25 index over graph nodes (bm25s)
+  dependency_graph/ts_patch_check.py        - patch-vs-rebuild equivalence check (regression guard)
   dependency_graph/queries/typescript.scm   - tree-sitter capture queries (typescript grammar)
   dependency_graph/queries/tsx.scm          - tsx-grammar deltas (JSX)
   plugins/location_tools/utils/compress_file_ts.py - tree-sitter skeletonizer (replaces the libcst one for TS)
-  locagent_mcp.py                           - FastMCP (stdio) server: search_code_entities,
-                                              get_entity, traverse, get_repo_overview
+  locagent_mcp.py                           - FastMCP (stdio) server: graph_search, graph_get,
+                                              graph_traverse, graph_map
   requirements-ts.txt                       - minimal runtime dependency set
   NOTICE                                    - this file
 
 Modified files:
-  dependency_graph/build_graph.py           - add EDGE_TYPE_RENDERS to VALID_EDGE_TYPES;
+  dependency_graph/build_graph.py           - VALID_EDGE_TYPES += renders, consumes_context,
+                                              provides_context; VALID_NODE_TYPES += context;
                                               matplotlib import made lazy (visualize_graph only)
   dependency_graph/traverse_graph.py        - is_test_file(): recognise JS/TS test conventions
                                               (*.test.*, *.spec.*, __tests__/, __mocks__/, *.stories.*);
                                               RepoEntitySearcher.global_name_dict[_lowercase]: index
                                               file nodes of any extension, not just .py (shared
-                                              _build_name_dict helper; Python behaviour unchanged)
+                                              _build_name_dict helper; Python behaviour unchanged);
+                                              _edge_annot(): context edges render their call sites
+  dependency_graph/ts_bm25.py               - index `context` nodes, with a token hint
   plugins/__init__.py                        - guard the optional benchmark-harness import so leaf
   plugins/location_tools/__init__.py           modules stay importable without llama_index/datasets
   README.md                                 - fork overview / setup section
   util/prompts/*.j2                          - light edits removing Python-specific idioms
+
+Behavioural changes specific to the TS front end (the Python path is untouched):
+  - `build_ts_graph(fuzzy_search=...)` defaults to False: cross-file `invokes`/`renders`/
+    `inherits` are resolved by import binding, and the global bare-name fallback is opt-in
+    (--fuzzy / LOCAGENT_FUZZY=1), export-gated and fan-in capped.
+  - React context flow is modelled: `context` nodes plus `consumes_context` /
+    `provides_context` edges with call sites.
+  - The graph keeps its per-node derivation attributes and per-file import list so a
+    changed file can be re-derived in place; see docs/TYPESCRIPT_PORT_PLAN.md (v6).
 
 Reused from upstream without functional change:
   plugins/location_tools/retriever/fuzzy_retriever.py

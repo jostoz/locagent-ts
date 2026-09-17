@@ -23,11 +23,12 @@ Wire into Cline (`~/.cline/data/settings/cline_mcp_settings.json`):
 """
 
 import contextlib
-import hashlib
+import json
 import logging
 import os
 import pickle
 import sys
+import time
 import warnings
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -69,13 +70,18 @@ from mcp.server.fastmcp import FastMCP  # noqa: E402
 
 from dependency_graph.build_graph import (  # noqa: E402
     NODE_TYPE_CLASS,
+    NODE_TYPE_CONTEXT,
     NODE_TYPE_DIRECTORY,
     NODE_TYPE_FILE,
     NODE_TYPE_FUNCTION,
     VALID_EDGE_TYPES,
 )
 from dependency_graph.ts_bm25 import TsBM25Index  # noqa: E402
-from dependency_graph.ts_build_graph import SKIP_DIRS, SOURCE_EXTS, build_ts_graph  # noqa: E402
+from dependency_graph.ts_build_graph import (  # noqa: E402
+    build_ts_graph,
+    iter_source_files,
+    patch_ts_graph,
+)
 from dependency_graph.traverse_graph import (  # noqa: E402
     RepoEntitySearcher,
     is_test_file,
@@ -92,12 +98,20 @@ REPO = Path(os.environ.get('LOCAGENT_REPO', os.getcwd())).resolve()
 # cache lives in the target repo by default; override for read-only trees.
 CACHE_DIR = Path(os.environ['LOCAGENT_CACHE_DIR']).resolve() \
     if os.environ.get('LOCAGENT_CACHE_DIR') else REPO / '.locagent'
-_CACHE_SCHEMA = 'v5'          # bump to invalidate all caches on a schema change
+# Global bare-name matching for invokes/renders the import scope cannot resolve.
+# Off by default: it is the setting that linked 294 753 production->test-double
+# edges on a 3k-file repo. Opt in with LOCAGENT_FUZZY=1 for repos whose imports
+# the resolver cannot follow (barrel-heavy layouts).
+_FUZZY = os.environ.get('LOCAGENT_FUZZY', '').strip().lower() in ('1', 'true', 'yes')
+_CACHE_SCHEMA = 'v6'          # bump to invalidate all caches on a schema change
                              # v2: invokes/renders edges carry call-site lines + JSX props
                              # v3: renders/invokes disambiguated by import binding
                              # v4: BM25 doc carries a weighted comment/JSDoc field
                              # v5: files with a stray non-UTF-8 byte are no longer
                              #     dropped from the graph (Board.tsx was missing)
+                             # v6: import-scoped resolution by default (no global
+                             #     name-match), context nodes + context edges,
+                             #     string-aware JSONC tsconfig parsing
 _MAX_FULL_LINES = 400         # graph_get(full) cap before it suggests skeleton
 _SKELETON_MIN_LINES = 40      # below this, skeleton saves nothing -> return full
 _FILE_SKELETON_MAX_LINES = 120  # above this, a file gets a graph outline, not a raw skeleton
@@ -106,39 +120,93 @@ _MAX_TRAVERSE_CHARS = 6000
 _STATE: dict = {}
 
 
-def _iter_source_files():
-    for root, dirs, files in os.walk(REPO):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith('.')]
-        for f in files:
-            if f.endswith(SOURCE_EXTS) and not f.endswith('.d.ts'):
-                yield os.path.join(root, f)
+def _scan() -> dict:
+    """``{rel_file: [mtime_ns, size]}`` for every source file the graph covers.
 
-
-def _repo_signature() -> str:
-    h = hashlib.sha256()
-    rows = []
-    for p in _iter_source_files():
+    Same walk as the builder (`iter_source_files`), so the scan and the graph can
+    never disagree about what counts as a source file. Nanosecond mtime matters:
+    an agent that edits a file and immediately asks a question must be seen, and
+    second-granularity mtimes with an unchanged byte count would hide it."""
+    out = {}
+    for rel_file, abs_path, _grammar, _rel_dir in iter_source_files(str(REPO)):
         try:
-            st = os.stat(p)
+            st = os.stat(abs_path)
         except OSError:
             continue
-        rel = os.path.relpath(p, REPO).replace(os.sep, '/')
-        rows.append(f'{rel}|{int(st.st_mtime)}|{st.st_size}')
-    for row in sorted(rows):
-        h.update(row.encode('utf-8') + b'\n')
-    h.update(_CACHE_SCHEMA.encode())
-    return h.hexdigest()
+        out[rel_file] = [st.st_mtime_ns, st.st_size]
+    return out
+
+
+def _sig_payload(scan: dict) -> str:
+    return json.dumps({'schema': _CACHE_SCHEMA, 'files': scan}, sort_keys=True)
 
 
 def _ensure_loaded() -> None:
-    if _STATE:
+    if not _STATE:
+        with _protect_stdout():
+            _build_state()
+    _refresh()
+
+
+def _refresh() -> None:
+    """Bring the in-memory graph up to date with the working tree.
+
+    Runs before every tool call. `os.stat` on the source set is ~ms; the graph
+    itself is only re-derived for the files that changed (plus the files that
+    reference them), so an edit costs a patch, not a rebuild."""
+    scan = _scan()
+    old = _STATE.get('scan') or {}
+    if scan == old:
         return
-    with _protect_stdout():
-        _build_state()
+    changed = [rel for rel, v in scan.items() if old.get(rel) != v]
+    deleted = [rel for rel in old if rel not in scan]
+    g = _STATE['graph']
+    t0 = time.time()
+    try:
+        if _FUZZY and (changed or deleted):
+            raise RuntimeError('global name matching is not patchable')
+        with _protect_stdout():
+            stats = patch_ts_graph(g, str(REPO), changed + deleted)
+        _STATE['searcher'] = RepoEntitySearcher(g)
+        _STATE['dirty_bm25'] = True
+        print(f'[locagent] patched {len(changed)} changed / {len(deleted)} deleted '
+              f'file(s) in {stats["seconds"]*1000:.0f}ms -> '
+              f'{g.number_of_nodes()} nodes, {g.number_of_edges()} edges',
+              file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 -- anything unexpected: full rebuild
+        print(f'[locagent] incremental patch failed ({exc}); rebuilding',
+              file=sys.stderr)
+        with _protect_stdout():
+            g = build_ts_graph(str(REPO), fuzzy_search=_FUZZY)
+            _STATE['graph'] = g
+            _STATE['searcher'] = RepoEntitySearcher(g)
+            _STATE['bm25'] = TsBM25Index.from_graph(g)
+            _STATE['dirty_bm25'] = False
+        print(f'[locagent] rebuilt in {time.time() - t0:.2f}s', file=sys.stderr)
+    _STATE['scan'] = scan
+    # the on-disk cache is now behind the working tree: leave it stale so the
+    # next start rebuilds instead of loading a graph that disagrees with the repo
+    if CACHE_DIR.is_dir():
+        try:
+            (CACHE_DIR / 'signature').write_text(
+                json.dumps({'schema': _CACHE_SCHEMA, 'files': {}}), encoding='utf-8')
+        except OSError:
+            pass
+
+
+def _bm25() -> TsBM25Index:
+    """The BM25 index, rebuilt from the current graph if edits invalidated it.
+    Kept out of the edit path (`graph_get` / `graph_traverse` never need it) and
+    paid on the next search instead."""
+    if _STATE.get('dirty_bm25') or 'bm25' not in _STATE:
+        with _protect_stdout():
+            _STATE['bm25'] = TsBM25Index.from_graph(_STATE['graph'])
+        _STATE['dirty_bm25'] = False
+    return _STATE['bm25']
 
 
 def _build_state() -> None:
-    sig = _repo_signature()
+    scan = _scan()
     gpkl = CACHE_DIR / 'graph.pkl'
     sigf = CACHE_DIR / 'signature'
     bm_dir = CACHE_DIR / 'bm25'
@@ -146,26 +214,29 @@ def _build_state() -> None:
     graph = bm25 = None
     if gpkl.exists() and sigf.exists() and bm_dir.exists():
         try:
-            if sigf.read_text(encoding='utf-8').strip() == sig:
+            stored = json.loads(sigf.read_text(encoding='utf-8'))
+            if stored.get('schema') == _CACHE_SCHEMA and stored.get('files') == scan:
                 graph = pickle.loads(gpkl.read_bytes())
                 bm25 = TsBM25Index.load(str(bm_dir))
         except Exception:  # noqa: BLE001 -- corrupt cache -> rebuild
             graph = bm25 = None
 
     if graph is None or bm25 is None:
-        graph = build_ts_graph(str(REPO))
+        graph = build_ts_graph(str(REPO), fuzzy_search=_FUZZY)
         bm25 = TsBM25Index.from_graph(graph)
         try:
             CACHE_DIR.mkdir(parents=True, exist_ok=True)
             gpkl.write_bytes(pickle.dumps(graph))
             bm25.save(str(bm_dir))
-            sigf.write_text(sig, encoding='utf-8')
+            sigf.write_text(_sig_payload(scan), encoding='utf-8')
         except OSError as exc:  # read-only repo, etc. -- run without a cache
             print(f'[locagent] cache disabled: {exc}', file=sys.stderr)
 
     _STATE['graph'] = graph
     _STATE['searcher'] = RepoEntitySearcher(graph)
     _STATE['bm25'] = bm25
+    _STATE['scan'] = scan
+    _STATE['dirty_bm25'] = False
     print(f'[locagent] {REPO}  ({graph.number_of_nodes()} nodes, '
           f'{graph.number_of_edges()} edges)', file=sys.stderr)
 
@@ -234,16 +305,18 @@ def _file_outline(g, nid: str, n_lines: int, raw_skeleton: str) -> str:
         if ed.get('type') != 'contains':
             continue
         cd = g.nodes[child]
-        if cd.get('type') not in (NODE_TYPE_FUNCTION, NODE_TYPE_CLASS):
+        if cd.get('type') not in (NODE_TYPE_FUNCTION, NODE_TYPE_CLASS, NODE_TYPE_CONTEXT):
             continue
         nm = child.split(':', 1)[1]
         if '.' in nm:            # nested -> only top-level here
             continue
         sig = next((ln.strip() for ln in (cd.get('skeleton') or '').splitlines()
                     if ln.strip() and not ln.strip().startswith(('//', '/*', '*'))), nm)
+        tag = ' [component]' if cd.get('is_component') else \
+              ' [context]' if cd.get('type') == NODE_TYPE_CONTEXT else ''
         rows.append((cd.get('start_line', 0),
                      f'  L{cd.get("start_line", "?")}-{cd.get("end_line", "?")}  '
-                     f'{sig[:140]}{" [component]" if cd.get("is_component") else ""}'))
+                     f'{sig[:140]}{tag}'))
     if not rows:
         head = '\n'.join(raw_skeleton.splitlines()[:_FILE_SKELETON_MAX_LINES])
         return (f'{nid}  (file, {n_lines} lines)  [skeleton head]\n```\n{head}\n'
@@ -299,22 +372,24 @@ mcp = FastMCP(
 
 @mcp.tool()
 def graph_search(query: str, max_results: int = 10, scope: str = 'all') -> str:
-    """Find code entities (functions, classes, React components, files) relevant
-    to a natural-language query, ranked by a fusion of BM25 and fuzzy name match.
+    """Find code entities (functions, classes, React components, React contexts,
+    files) relevant to a natural-language query, ranked by a fusion of BM25 and
+    fuzzy name match.
 
     Args:
         query: what you are looking for, e.g. "selection toolbar styling".
         max_results: how many entities to return (default 10).
-        scope: one of "all", "function", "class", "file".
+        scope: one of "all", "function", "class", "context", "file".
     """
     _ensure_loaded()
     g = _STATE['graph']
-    if scope not in ('all', NODE_TYPE_FUNCTION, NODE_TYPE_CLASS, NODE_TYPE_FILE):
-        return f'bad scope {scope!r}; use one of all|function|class|file'
+    if scope not in ('all', NODE_TYPE_FUNCTION, NODE_TYPE_CLASS, NODE_TYPE_FILE,
+                     NODE_TYPE_CONTEXT):
+        return f'bad scope {scope!r}; use one of all|function|class|context|file'
     max_results = max(1, min(max_results, 30))
 
     with _protect_stdout():
-        bm = _STATE['bm25'].retrieve(query, k=max_results * 3, search_scope=scope)
+        bm = _bm25().retrieve(query, k=max_results * 3, search_scope=scope)
         try:
             fz = fuzzy_retrieve_from_graph_nodes(
                 query, graph=g, search_scope=scope, similarity_top_k=max_results * 3)
@@ -347,7 +422,8 @@ def graph_search(query: str, max_results: int = 10, scope: str = 'all') -> str:
             sk = (nd.get('skeleton') or '').splitlines()
             head = next((ln.strip() for ln in sk if ln.strip()
                          and not ln.strip().startswith(('//', '/*', '*'))), '')
-        tag = ', component' if nd.get('is_component') else ''
+        tag = ', component' if nd.get('is_component') else \
+              ', context' if nd.get('type') == NODE_TYPE_CONTEXT else ''
         out.append(f'- {nid}  ({nd.get("type")}{tag}, {_loc(nid, nd)})'
                    + (f'\n    {head[:160]}' if head else ''))
     out.append('\nNext: graph_get("<id>") for code, graph_traverse("<id>") for neighbours.')
@@ -420,8 +496,8 @@ def graph_traverse(entity_id: str = '', edge_types: Optional[List[str]] = None,
 
     Args:
         entity_id: node id to start from. `id` is accepted as an alias.
-        edge_types: subset of ["contains","imports","invokes","inherits","renders"]
-            (default: all).
+        edge_types: subset of ["contains","imports","invokes","inherits","renders",
+            "consumes_context","provides_context"] (default: all).
         direction: "downstream" (this -> others), "upstream" (others -> this) or "both".
         hops: traversal depth, 1-4 (default 2). For "what directly renders / calls
             X" use hops=1 -- the answer is the first level. hops>=2 also shows the
@@ -478,7 +554,8 @@ def graph_traverse(entity_id: str = '', edge_types: Optional[List[str]] = None,
     if g.nodes[nid].get('type') == NODE_TYPE_FILE:
         kids = [v for _, v, ed in g.out_edges(nid, data=True)
                 if ed.get('type') == 'contains'
-                and g.nodes[v].get('type') in (NODE_TYPE_FUNCTION, NODE_TYPE_CLASS)
+                and g.nodes[v].get('type') in (NODE_TYPE_FUNCTION, NODE_TYPE_CLASS,
+                                               NODE_TYPE_CONTEXT)
                 and '.' not in v.split(':', 1)[1]]
         blocks = []
         for k in sorted(kids):
@@ -540,7 +617,7 @@ def graph_map(max_depth: int = 3) -> str:
 
     walk('/', '', 1)
 
-    n = {'file': 0, 'function': 0, 'class': 0, 'component': 0}
+    n = {'file': 0, 'function': 0, 'class': 0, 'context': 0, 'component': 0}
     for _, nd in g.nodes(data=True):
         t = nd.get('type')
         if t in n:
@@ -552,7 +629,8 @@ def graph_map(max_depth: int = 3) -> str:
         e[d.get('type')] = e.get(d.get('type'), 0) + 1
 
     header = (f'{REPO.name}: {n["file"]} files, {n["function"]} functions '
-              f'({n["component"]} React components), {n["class"]} classes\n'
+              f'({n["component"]} React components), {n["class"]} classes, '
+              f'{n["context"]} contexts\n'
               f'edges: {e}\n')
     return header + '```\n' + '\n'.join(lines[:400]) + '\n```'
 

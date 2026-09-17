@@ -25,11 +25,11 @@ def is_test_file(nid):
 
 def _edge_annot(ed: dict) -> str:
     """Compact call-site annotation for an edge, appended after the neighbour in
-    the traverse tree. `renders` -> `  @L<lines> {prop=expr, ...}`;
-    `invokes` -> `  @L<lines>`. Empty for edges without site metadata (v1 graphs,
-    contains / imports / inherits)."""
+    the traverse tree. `renders` / `provides_context` -> `  @L<lines> {prop=expr}`;
+    `invokes` / `consumes_context` -> `  @L<lines>`. Empty for edges without site
+    metadata (contains / imports / inherits)."""
     t = ed.get('type')
-    if t == 'renders':
+    if t in ('renders', 'provides_context'):
         parts = []
         lines = ed.get('jsx_lines') or []
         if lines:
@@ -41,7 +41,7 @@ def _edge_annot(ed: dict) -> str:
             shown = ', '.join(f'{k}={v}' for k, v in list(props.items())[:6])
             parts.append('{' + shown + '}')
         return ('  ' + ' '.join(parts)) if parts else ''
-    if t == 'invokes':
+    if t in ('invokes', 'consumes_context'):
         lines = ed.get('call_lines') or []
         if lines:
             return '  @L' + ','.join(str(n) for n in lines[:5])

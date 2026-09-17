@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import os
 import posixpath
-import re
 from typing import Dict, List, Optional
 
 # Extension probe order when a specifier has no extension.
@@ -26,12 +25,135 @@ _TSCONFIG_NAMES = ('tsconfig.json', 'tsconfig.app.json', 'tsconfig.base.json')
 
 
 def _strip_jsonc(text: str) -> str:
-    """Best-effort strip of // and /* */ comments and trailing commas so a
-    tsconfig (JSONC) can go through ``json.loads``."""
-    text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)
-    text = re.sub(r'(^|[^:])//[^\n\r]*', r'\1', text)
-    text = re.sub(r',(\s*[}\]])', r'\1', text)
-    return text
+    """Strip ``//`` and ``/* */`` comments and trailing commas so a tsconfig
+    (JSONC) can go through ``json.loads``.
+
+    String-aware on purpose: a naive regex eats the ``/*`` inside the glob
+    ``"**/*.ts"`` -- which every Next.js tsconfig has in ``include`` -- and
+    silently truncates the file, losing ``compilerOptions.paths`` and with it
+    every ``@/`` import (measured: DeskcommCRM resolved 0 aliases that way).
+    """
+    out: List[str] = []
+    i, n = 0, len(text)
+    in_str = False
+    while i < n:
+        ch = text[i]
+        if in_str:
+            out.append(ch)
+            if ch == '\\' and i + 1 < n:
+                out.append(text[i + 1])
+                i += 2
+                continue
+            if ch == '"':
+                in_str = False
+            i += 1
+            continue
+        if ch == '"':
+            in_str = True
+            out.append(ch)
+            i += 1
+            continue
+        if ch == '/' and i + 1 < n and text[i + 1] == '/':
+            while i < n and text[i] not in '\r\n':
+                i += 1
+            continue
+        if ch == '/' and i + 1 < n and text[i + 1] == '*':
+            end = text.find('*/', i + 2)
+            i = n if end < 0 else end + 2
+            continue
+        out.append(ch)
+        i += 1
+
+    # trailing commas: keep string contents untouched too
+    cleaned: List[str] = []
+    i, n = 0, len(out)
+    while i < n:
+        ch = out[i]
+        if ch == '"':
+            j = i + 1
+            while j < n and not (out[j] == '"' and out[j - 1] != '\\'):
+                j += 1
+            cleaned.extend(out[i:j + 1])
+            i = j + 1
+            continue
+        if ch == ',':
+            j = i + 1
+            while j < n and out[j] in ' \t\r\n':
+                j += 1
+            if j < n and out[j] in '}]':
+                i += 1
+                continue
+        cleaned.append(ch)
+        i += 1
+    return ''.join(cleaned)
+
+
+def _read_jsonc(path: str) -> Optional[dict]:
+    try:
+        with open(path, 'r', encoding='utf-8') as fh:
+            return json.loads(_strip_jsonc(fh.read()))
+    except (ValueError, OSError):
+        return None
+
+
+_EXTENDS_MAX_DEPTH = 5
+
+
+def _load_tsconfig(path: str, _depth: int = 0, _seen: Optional[set] = None) -> Optional[dict]:
+    """Parse one tsconfig with its ``extends`` chain merged in (parent first, so
+    the child's ``compilerOptions`` win). Returns ``None`` when it is missing or
+    unparseable.
+
+    ``compilerOptions`` entries carry the directory of the config that declared
+    them (``_dir``), because a child's ``baseUrl`` is relative to the child while
+    an inherited one stays relative to the parent -- path aliases break if the
+    two are conflated."""
+    if _depth > _EXTENDS_MAX_DEPTH:
+        return None
+    _seen = _seen or set()
+    real = os.path.normcase(os.path.abspath(path))
+    if real in _seen:
+        return None
+    _seen.add(real)
+
+    cfg = _read_jsonc(path)
+    if cfg is None:
+        return None
+
+    here = os.path.dirname(path)
+    merged: Dict[str, object] = {}
+    inherited_paths = inherited_base = None
+    for key, value in (cfg.get('compilerOptions') or {}).items():
+        merged[key] = value
+    if 'paths' in merged:
+        inherited_paths = (merged['paths'], here)
+    if 'baseUrl' in merged:
+        inherited_base = (merged['baseUrl'], here)
+
+    parent_ref = cfg.get('extends')
+    if isinstance(parent_ref, str) and parent_ref:
+        if parent_ref.startswith('.'):
+            base = os.path.join(here, parent_ref.replace('/', os.sep))
+        else:  # package-style extends (e.g. "next/tsconfig.json") -- unresolved
+            base = None
+        candidates = [base, base + '.json'] if base else []
+        for cand in candidates:
+            if cand and os.path.isfile(cand):
+                parent = _load_tsconfig(cand, _depth + 1, _seen)
+                if parent:
+                    p_opts = parent.get('compilerOptions') or {}
+                    merged = {**p_opts, **merged}
+                    inherited_paths = parent.get('_paths', (None, None))
+                    inherited_base = parent.get('_base', (None, None))
+                    if 'paths' in (cfg.get('compilerOptions') or {}):
+                        inherited_paths = (cfg['compilerOptions']['paths'], here)
+                    if 'baseUrl' in (cfg.get('compilerOptions') or {}):
+                        inherited_base = (cfg['compilerOptions']['baseUrl'], here)
+                break
+
+    return {'compilerOptions': merged,
+            '_paths': inherited_paths or (merged.get('paths'), here),
+            '_base': inherited_base or (merged.get('baseUrl'), here)}
 
 
 def load_alias_map(repo_path: str) -> Dict[str, List[str]]:
@@ -45,14 +167,28 @@ def load_alias_map(repo_path: str) -> Dict[str, List[str]]:
         cfg_path = os.path.join(repo_path, name)
         if not os.path.isfile(cfg_path):
             continue
-        try:
-            with open(cfg_path, 'r', encoding='utf-8') as fh:
-                cfg = json.loads(_strip_jsonc(fh.read()))
-        except (ValueError, OSError):
+        cfg = _load_tsconfig(cfg_path)
+        if not cfg:
             continue
-        opts = cfg.get('compilerOptions', {}) or {}
-        base_url = (opts.get('baseUrl', '.') or '.').replace('\\', '/')
-        paths = opts.get('paths', {}) or {}
+        paths, paths_dir = cfg.get('_paths') or (None, None)
+        base_url, base_dir = cfg.get('_base') or (None, None)
+        if not paths:
+            continue
+
+        # baseUrl resolves against its own config's dir; default is the dir of
+        # the config that declared `paths` (TS: paths are relative to baseUrl,
+        # which itself defaults to the tsconfig's directory).
+        def _rel_dir(path: str) -> str:
+            rel = os.path.relpath(path, repo_path).replace(os.sep, '/')
+            return '' if rel == '.' else rel
+
+        base_prefix = _rel_dir(base_dir or paths_dir or repo_path)
+        if base_url:
+            base_prefix = posixpath.normpath(
+                posixpath.join(base_prefix, base_url.replace('\\', '/')))
+            if base_prefix == '.':
+                base_prefix = ''
+
         alias_map: Dict[str, List[str]] = {}
         for pattern, targets in paths.items():
             # "@/*" -> key "@/", "@app" -> key "@app"
@@ -61,7 +197,7 @@ def load_alias_map(repo_path: str) -> Dict[str, List[str]]:
             for target in targets:
                 # "./src/*" -> "./src", "src/lib" -> "src/lib"
                 t = target[:-1] if target.endswith('*') else target
-                joined = posixpath.normpath(posixpath.join(base_url, t))
+                joined = posixpath.normpath(posixpath.join(base_prefix, t))
                 if joined in ('.', './'):
                     joined = ''
                 elif joined.startswith('./'):

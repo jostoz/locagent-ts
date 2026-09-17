@@ -77,3 +77,38 @@
 (call_expression
   function: (member_expression
     property: (property_identifier) @call.name))
+
+; ───────────────────────────  react context  ─────────────────────────
+; useContext(Ctx) / useContext(Ctx.Sub) / React.useContext(Ctx) -- the argument
+; names the context object the enclosing component consumes. Resolved against
+; context nodes by name with the usual import-binding precedence.
+(call_expression
+  function: (identifier) @ctx.hook
+  arguments: (arguments . (identifier) @ctx.arg)
+  (#eq? @ctx.hook "useContext"))
+
+(call_expression
+  function: (identifier) @ctx.hook
+  arguments: (arguments . (member_expression
+    object: (identifier) @ctx.arg))
+  (#eq? @ctx.hook "useContext"))
+
+(call_expression
+  function: (member_expression
+    property: (property_identifier) @ctx.hook)
+  arguments: (arguments . (identifier) @ctx.arg)
+  (#eq? @ctx.hook "useContext"))
+
+; const Ctx = createContext(...) / React.createContext<T>(...) -> its own node
+(variable_declarator
+  name: (identifier) @ctx.name
+  value: (call_expression
+    function: (identifier) @ctx.factory)
+  (#eq? @ctx.factory "createContext")) @def.context
+
+(variable_declarator
+  name: (identifier) @ctx.name
+  value: (call_expression
+    function: (member_expression
+      property: (property_identifier) @ctx.factory))
+  (#eq? @ctx.factory "createContext")) @def.context

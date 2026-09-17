@@ -48,11 +48,14 @@ from tree_sitter_languages import get_language, get_parser
 
 from dependency_graph.build_graph import (
     EDGE_TYPE_CONTAINS,
+    EDGE_TYPE_CONSUMES_CONTEXT,
     EDGE_TYPE_IMPORTS,
     EDGE_TYPE_INHERITS,
     EDGE_TYPE_INVOKES,
+    EDGE_TYPE_PROVIDES_CONTEXT,
     EDGE_TYPE_RENDERS,
     NODE_TYPE_CLASS,
+    NODE_TYPE_CONTEXT,
     NODE_TYPE_DIRECTORY,
     NODE_TYPE_FILE,
     NODE_TYPE_FUNCTION,
@@ -90,6 +93,7 @@ _DEF_KIND = {
     'def.function': NODE_TYPE_FUNCTION,
     'def.class': NODE_TYPE_CLASS,
     'def.wrapped': NODE_TYPE_FUNCTION,
+    'def.context': NODE_TYPE_CONTEXT,
 }
 
 # extremely common Array / Promise / string / DOM method names -- a bare-name
@@ -116,6 +120,12 @@ _SKELETON_MAX = 600
 # max number of enclosing captured defs before a nested def is dropped as noise
 # (e.g. a named helper inside a `.map()` callback inside a method inside a class).
 _MAX_NEST_DEPTH = 3
+# Global name-match fallback (`fuzzy_search=True`): only an *exported* entity that
+# is not one of many same-named ones can be a real cross-file target. Measured on
+# DeskcommCRM: ungated, the fallback produced 294 753 `invokes` for 9 297 functions
+# and linked production code to test doubles (`FakeQB.update`, `chain.get`);
+# gated, the fallback stays opt-in and bounded.
+_MAX_UNBOUND_FANOUT = 6
 
 
 # ──────────────────────────────  query loading  ──────────────────────────────
@@ -290,18 +300,30 @@ _JSX_PROP_MAX = 80        # truncate one bound expression's source text
 _JSX_PROPS_PER_SITE = 12  # cap props recorded per JSX tag
 
 
-def _jsx_tag_name(el, data: bytes) -> Optional[str]:
-    """Tag name of a jsx_opening_element / jsx_self_closing_element. For
-    ``<Foo.Bar />`` returns ``Bar`` (matched name-only, like the call heuristic)."""
+def _jsx_tag_parts(el, data: bytes) -> Tuple[Optional[str], Optional[str]]:
+    """``(object_name, tag_name)`` of a jsx_opening_element / jsx_self_closing_element.
+    ``<Foo />`` -> ``(None, 'Foo')``; ``<Foo.Bar />`` -> ``('Foo', 'Bar')`` -- the
+    object half is what distinguishes a context `<Ctx.Provider>` from a
+    component genuinely named ``Provider``."""
     nm = el.child_by_field_name('name')
     if nm is None:
-        return None
+        return None, None
     if nm.type == 'member_expression':
+        obj = nm.child_by_field_name('object')
         prop = nm.child_by_field_name('property')
-        return _node_text(prop, data) if prop is not None else None
+        if obj is None or prop is None:
+            # the 2023 tsx grammar parses a JSX tag member expression with
+            # positional children (identifier, '.', property_identifier) and no
+            # named fields -- fall back to positions
+            ids = [ch for ch in nm.children
+                   if ch.type in ('identifier', 'property_identifier')]
+            if len(ids) >= 2:
+                obj, prop = ids[0], ids[-1]
+        obj_name = _node_text(obj, data) if obj is not None and obj.type == 'identifier' else None
+        return obj_name, (_node_text(prop, data) if prop is not None else None)
     if nm.type in ('identifier', 'property_identifier'):
-        return _node_text(nm, data)
-    return None
+        return None, _node_text(nm, data)
+    return None, None
 
 
 def _collapse_expr(node, data: bytes) -> str:
@@ -356,8 +378,10 @@ def analyze_ts_file(abs_path: str, grammar: str) -> Tuple[List[dict], List[dict]
 
     ``entities`` -- list of dicts: ``name`` (dotted), ``type``, ``code``,
     ``start_line``, ``end_line``, ``parent_type``, ``skeleton``, ``is_component``,
-    ``calls`` (list[(name, line)]), ``renders`` (list[{name, line, props}]),
-    ``heritage`` (list[str]).
+    ``is_exported``, ``is_context``, ``calls`` (list[(name, line)]), ``renders``
+    (list[{name, line, props}]), ``heritage`` (list[str]), ``contexts``
+    (list[{name, line}] from ``useContext(Ctx)``), ``provides``
+    (list[{name, line, props}] from ``<Ctx.Provider value={...}>``).
 
     ``imports`` -- list of dicts: ``source`` (raw specifier), ``names``
     (list[str]; ``'*'`` for namespace/side-effect/re-export-all), ``kind``
@@ -375,6 +399,7 @@ def analyze_ts_file(abs_path: str, grammar: str) -> Tuple[List[dict], List[dict]
     jsx_caps: List[object] = []
     heritage_caps: List[object] = []
     import_nodes: List[object] = []
+    ctx_caps: List[object] = []
 
     for node, cap in captures:
         if cap in _DEF_KIND:
@@ -387,7 +412,15 @@ def analyze_ts_file(abs_path: str, grammar: str) -> Tuple[List[dict], List[dict]
             heritage_caps.append(node)
         elif cap == 'import.node':
             import_nodes.append(node)
+        elif cap == 'ctx.arg':
+            ctx_caps.append(node)
 
+    # `const Ctx = createContext(...)` matches def.wrapped AND def.context; keep
+    # the context node only (the wrapped-function path would drop it anyway).
+    ctx_keys = {_key(n) for n, k in def_nodes if k == NODE_TYPE_CONTEXT}
+    def_nodes = [(n, k) for n, k in def_nodes
+                 if not (k == NODE_TYPE_FUNCTION and _key(n) in ctx_keys
+                         and n.type == 'variable_declarator')]
     def_kinds = {_key(n): kind for n, kind in def_nodes}
 
     def enclosing_def(node):
@@ -422,8 +455,10 @@ def analyze_ts_file(abs_path: str, grammar: str) -> Tuple[List[dict], List[dict]
 
         # `const X = someCall(...)` matched def.wrapped: keep it only when the
         # call actually wraps a function (forwardRef/memo/...), else it is just a
-        # value binding (`const x = compute()`) and not an entity.
-        if node.type == 'variable_declarator':
+        # value binding (`const x = compute()`) and not an entity. A context
+        # object (`createContext(...)`) IS an entity -- it is the node both sides
+        # of the React context flow point at.
+        if node.type == 'variable_declarator' and kind != NODE_TYPE_CONTEXT:
             value = node.child_by_field_name('value')
             if value is not None and value.type == 'call_expression' \
                     and _find_inner_function(value) is None:
@@ -448,9 +483,13 @@ def analyze_ts_file(abs_path: str, grammar: str) -> Tuple[List[dict], List[dict]
             'parent_type': parent_type,
             'skeleton': _skeleton(node, outer, data),
             'is_component': is_component,
+            'is_exported': outer.type == 'export_statement',
+            'is_context': kind == NODE_TYPE_CONTEXT,
             'calls': [],
             'renders': [],
             'heritage': [],
+            'contexts': [],
+            'provides': [],
         }
         entities.append(ent)
         entity_by_id[_key(node)] = ent
@@ -473,16 +512,34 @@ def analyze_ts_file(abs_path: str, grammar: str) -> Tuple[List[dict], List[dict]
             ent['calls'].append((nm, cnode.start_point[0] + 1))
 
     for el in jsx_caps:
-        comp = _jsx_tag_name(el, data)
-        if not comp or not _is_pascal_case(comp):
+        obj, tag = _jsx_tag_parts(el, data)
+        if not tag or not _is_pascal_case(tag):
             continue
         ent = owner_entity(el)
-        if ent is not None:
-            ent['renders'].append({
-                'name': comp,
+        if ent is None:
+            continue
+        # <BoardContext.Provider value={...}> -- the provider side of the flow,
+        # not a component render. The bound `value` is the wiring worth showing.
+        if tag == 'Provider' and obj and _is_pascal_case(obj):
+            ent['provides'].append({
+                'name': obj,
                 'line': el.start_point[0] + 1,
                 'props': _jsx_wiring_props(el, data),
             })
+            continue
+        ent['renders'].append({
+            'name': tag,
+            'line': el.start_point[0] + 1,
+            'props': _jsx_wiring_props(el, data),
+        })
+
+    for cnode in ctx_caps:
+        nm = _node_text(cnode, data)
+        if not nm:
+            continue
+        ent = owner_entity(cnode)
+        if ent is not None and nm != ent['name'].split('.')[-1]:
+            ent['contexts'].append({'name': nm, 'line': cnode.start_point[0] + 1})
 
     for hnode in heritage_caps:
         # heritage.name sits inside class_heritage -> class_declaration
@@ -544,7 +601,263 @@ def _skip_dir(rel_dir: str) -> bool:
     return any(part in SKIP_DIRS for part in rel_dir.replace('\\', '/').split('/'))
 
 
-def build_ts_graph(repo_path: str, fuzzy_search: bool = True, verbose: bool = False) -> nx.MultiDiGraph:
+def _is_source_name(fname: str) -> bool:
+    return fname.endswith(SOURCE_EXTS) and not fname.endswith('.d.ts')
+
+
+def _walk_sources(repo_path: str):
+    """DFS over the repo's source files, yielding ``(rel_file, entry, rel_dir)``.
+
+    Uses ``os.scandir`` so the caller gets a `DirEntry` (its stat is served from
+    the directory listing on Windows) instead of paying a second syscall per
+    file -- that difference is what makes a per-tool-call staleness scan cheap."""
+    repo_path = os.path.abspath(repo_path)
+
+    def rec(abs_dir: str, rel_dir: str):
+        try:
+            entries = list(os.scandir(abs_dir))
+        except OSError:
+            return
+        for entry in entries:
+            if entry.is_dir():
+                if entry.name in SKIP_DIRS or entry.name.startswith('.git'):
+                    continue
+                child = entry.name if rel_dir == '/' else f'{rel_dir}/{entry.name}'
+                if _skip_dir(child):
+                    continue
+                yield from rec(entry.path, child)
+            elif _is_source_name(entry.name) and not entry.is_symlink():
+                rel_file = entry.name if rel_dir == '/' else f'{rel_dir}/{entry.name}'
+                yield rel_file, entry, rel_dir
+
+    yield from rec(repo_path, '/')
+
+
+def iter_source_files(repo_path: str):
+    """Yield ``(rel_file, abs_path, grammar, rel_dir)`` for every TS/TSX source
+    under *repo_path*, skipping ``SKIP_DIRS``, dot-directories, ``.d.ts`` and
+    symlinks.
+
+    Shared by the builder and the MCP's staleness scan so neither can disagree
+    with the other about what is in the graph."""
+    for rel_file, entry, rel_dir in _walk_sources(repo_path):
+        yield (rel_file, entry.path,
+               GRAMMAR_BY_EXT[os.path.splitext(entry.name)[1]], rel_dir)
+
+
+def scan_sources(repo_path: str) -> Dict[str, list]:
+    """``{rel_file: [mtime_ns, size]}`` for every source file -- the staleness
+    fingerprint, from the same walk the builder uses."""
+    out: Dict[str, list] = {}
+    for rel_file, entry, _rel_dir in _walk_sources(repo_path):
+        try:
+            st = entry.stat()
+        except OSError:
+            continue
+        out[rel_file] = [st.st_mtime_ns, st.st_size]
+    return out
+
+
+def load_source(abs_path: str) -> Optional[str]:
+    """Read a source file as text, tolerating a stray non-UTF-8 byte.
+
+    bytes + lenient decode: a UTF-16 string chunk pasted into an otherwise-UTF-8
+    .tsx must not drop the whole file from the graph (seen in the wild). U+FFFD
+    is 1 byte -> 1 char, so newline offsets stay aligned with tree-sitter's byte
+    parse."""
+    try:
+        with open(abs_path, 'rb') as fh:
+            return fh.read().decode('utf-8', 'replace')
+    except OSError:
+        return None
+
+
+def _graph_add_file(graph, rel_dir, rel_file, content, grammar, entities, imports) -> None:
+    """Add one file's node, its entity nodes and the `contains` edges.
+
+    The file's parsed import list rides on its node as ``imports`` (replaced, not
+    mutated, so a `graph.copy()` -- which shallow-copies node attr dicts -- cannot
+    alias it into the copy). `patch_ts_graph` needs it to recompute a referencing
+    file's import edges without re-parsing that file."""
+    _ensure_dir_chain(graph, rel_dir)
+    graph.add_node(rel_file, type=NODE_TYPE_FILE, code=content, language=grammar,
+                   imports=imports)
+    graph.add_edge(rel_dir if rel_dir != '/' else '/', rel_file, type=EDGE_TYPE_CONTAINS)
+
+    for ent in entities:
+        graph.add_node(
+            f'{rel_file}:{ent["name"]}', type=ent['type'], code=ent['code'],
+            start_line=ent['start_line'], end_line=ent['end_line'],
+            parent_type=ent['parent_type'], skeleton=ent['skeleton'],
+            is_component=ent['is_component'],
+            is_exported=ent['is_exported'],
+            is_context=ent['is_context'],
+            _calls=ent['calls'], _renders=ent['renders'], _heritage=ent['heritage'],
+            _contexts=ent['contexts'], _provides=ent['provides'],
+        )
+    for ent in entities:
+        nid = f'{rel_file}:{ent["name"]}'
+        parts = ent['name'].split('.')
+        if len(parts) == 1:
+            graph.add_edge(rel_file, nid, type=EDGE_TYPE_CONTAINS)
+        else:
+            parent_nid = f'{rel_file}:{".".join(parts[:-1])}'
+            graph.add_edge(parent_nid if graph.has_node(parent_nid) else rel_file,
+                           nid, type=EDGE_TYPE_CONTAINS)
+
+
+_DERIVED_EDGE_TYPES = (EDGE_TYPE_IMPORTS, EDGE_TYPE_INVOKES, EDGE_TYPE_RENDERS,
+                       EDGE_TYPE_INHERITS, EDGE_TYPE_CONSUMES_CONTEXT,
+                       EDGE_TYPE_PROVIDES_CONTEXT)
+
+
+def _file_nodes(graph, rel_file: str) -> List[str]:
+    """The file node plus every entity node it contains, transitively (nested
+    entities hang off their parent entity, not off the file). Walking `contains`
+    beats scanning every node in the graph once per affected file."""
+    if not graph.has_node(rel_file):
+        return []
+    out = [rel_file]
+    stack = [rel_file]
+    while stack:
+        cur = stack.pop()
+        for _, v, d in graph.out_edges(cur, data=True):
+            if d.get('type') == EDGE_TYPE_CONTAINS:
+                out.append(v)
+                stack.append(v)
+    return out
+
+
+def _remove_file_from_graph(graph, rel_file: str) -> int:
+    """Drop a file node, its entity nodes and every incident edge."""
+    doomed = _file_nodes(graph, rel_file)
+    graph.remove_nodes_from(doomed)
+    return len(doomed)
+
+
+def _drop_derived_out_edges(graph, rel_file: str) -> None:
+    """Remove the derived (name/import-resolved) out-edges of a file's nodes,
+    keeping `contains`. Called before recomputing them for a file that is being
+    re-analysed without being re-added, so recomputation stays idempotent."""
+    doomed = []
+    for n in _file_nodes(graph, rel_file):
+        for _, v, k, d in list(graph.out_edges(n, keys=True, data=True)):
+            if d.get('type') in _DERIVED_EDGE_TYPES:
+                doomed.append((n, v, k))
+    for u, v, k in doomed:
+        graph.remove_edge(u, v, key=k)
+
+
+_DERIVED_EDGE_TYPES = (EDGE_TYPE_IMPORTS, EDGE_TYPE_INVOKES, EDGE_TYPE_RENDERS,
+                       EDGE_TYPE_INHERITS, EDGE_TYPE_CONSUMES_CONTEXT,
+                       EDGE_TYPE_PROVIDES_CONTEXT)
+
+
+def _prune_empty_dirs(graph, candidates) -> int:
+    """Drop directory nodes among *candidates* that no longer contain anything (a
+    deleted file can leave its directory chain dangling). Never touches the root,
+    never scans the whole graph."""
+    doomed = []
+    for nid in candidates:
+        attrs = graph.nodes.get(nid)
+        if not attrs or attrs.get('type') != NODE_TYPE_DIRECTORY or nid == '/':
+            continue
+        if not any(d.get('type') == EDGE_TYPE_CONTAINS
+                   for _, _, d in graph.out_edges(nid, data=True)):
+            doomed.append(nid)
+    graph.remove_nodes_from(doomed)
+    return len(doomed)
+
+
+def patch_ts_graph(graph, repo_path: str, changed_files, verbose: bool = False) -> dict:
+    """Re-derive only the part of *graph* that *changed_files* can affect.
+
+    Only the changed files are re-parsed. Everything that can *bind* to them --
+    any file holding an edge into one of their nodes -- has its derived out-edges
+    dropped and recomputed from the analysis already retained on its nodes
+    (`_calls` / `_renders` / `_heritage` / `_contexts` / `_provides` and the
+    per-file import list in ``graph.graph['file_imports']``). Those edges died
+    with the removed nodes, and the caller side is what recreates them.
+
+    Import-scoped resolution makes the set closed: an edge can only point at a
+    changed file's entity if the caller imports that file, so no file outside the
+    set can gain or lose an edge. Requires ``fuzzy_search=False`` -- the global
+    bare-name match would break that closure, so rebuild instead.
+
+    Returns counters (``changed``, ``recomputed``, ``removed``, ``parsed``,
+    ``seconds``).
+    """
+    t0 = time.time()
+    repo_path = os.path.abspath(repo_path)
+    changed = {f.replace('\\', '/') for f in changed_files}
+
+    # every file with an edge into a changed file's nodes -- those edges are
+    # about to be deleted along with those nodes. Directories are excluded: the
+    # `contains` edge from the changed file's own directory points into it, and a
+    # directory in this set would drag every sibling file into the recompute.
+    recompute = set(changed)
+    for u, v, _d in graph.edges(data=True):
+        if v.split(':')[0] in changed and \
+                graph.nodes[u].get('type') != NODE_TYPE_DIRECTORY:
+            recompute.add(u.split(':')[0])
+
+    removed = 0
+    for rel in changed:
+        removed += _remove_file_from_graph(graph, rel)
+
+    alias_map = load_alias_map(repo_path)
+    parsed = 0
+    for rel in sorted(changed):
+        abs_path = os.path.join(repo_path, rel.replace('/', os.sep))
+        grammar = GRAMMAR_BY_EXT.get(os.path.splitext(rel)[1])
+        if grammar is None or not os.path.isfile(abs_path):
+            continue                        # deleted: nodes and edges are gone
+        content = load_source(abs_path)
+        if content is None:
+            continue
+        try:
+            entities, imports = analyze_ts_file(abs_path, grammar)
+        except Exception:
+            entities, imports = [], []
+        _graph_add_file(graph, os.path.dirname(rel) or '/', rel, content, grammar,
+                        entities, imports)
+        parsed += 1
+
+    for rel in recompute - changed:
+        _drop_derived_out_edges(graph, rel)
+
+    subset = {rel: graph.nodes[rel].get('imports', []) for rel in recompute
+              if graph.has_node(rel)}
+    _add_import_edges(graph, repo_path, subset, alias_map=alias_map)
+    _add_reference_edges(graph, subset, fuzzy_search=False, only=recompute)
+
+    candidate_dirs = []
+    for rel in changed:
+        parts = rel.split('/')[:-1]
+        for i in range(1, len(parts) + 1):
+            d = '/'.join(parts[:i])
+            if d not in candidate_dirs:
+                candidate_dirs.append(d)
+    pruned = _prune_empty_dirs(graph, candidate_dirs)
+
+    stats = {'changed': len(changed), 'recomputed': len(recompute), 'removed': removed,
+             'parsed': parsed, 'pruned_dirs': pruned, 'seconds': time.time() - t0}
+    if verbose:
+        print(f'  patched {stats}', file=sys.stderr)
+    return stats
+
+
+def build_ts_graph(repo_path: str, fuzzy_search: bool = False, verbose: bool = False) -> nx.MultiDiGraph:
+    """Parse *repo_path* into the heterogeneous code graph.
+
+    ``fuzzy_search`` enables the last-resort global name match for `invokes` /
+    `renders` / `inherits` when neither the import binding nor the caller's
+    imported files resolve a name. It is OFF by default: import-scoped
+    resolution is exact, while the global fallback links by bare name (measured
+    on DeskcommCRM: 294 753 `invokes` for 9 297 functions, mostly production ->
+    test-double noise). The fallback also stays export-gated and fan-in capped
+    when enabled (``_MAX_UNBOUND_FANOUT``).
+    """
     repo_path = os.path.abspath(repo_path)
     graph = nx.MultiDiGraph()
     graph.add_node('/', type=NODE_TYPE_DIRECTORY)
@@ -553,85 +866,27 @@ def build_ts_graph(repo_path: str, fuzzy_search: bool = True, verbose: bool = Fa
     files_seen = 0
     parse_errors = 0
 
-    for root, dirs, files in os.walk(repo_path):
-        rel_dir = os.path.relpath(root, repo_path).replace(os.sep, '/')
-        if rel_dir == '.':
-            rel_dir = '/'
-        elif _skip_dir(rel_dir):
-            dirs[:] = []
+    for rel_file, abs_path, grammar, rel_dir in iter_source_files(repo_path):
+        content = load_source(abs_path)
+        if content is None:
             continue
-        # prune child dirs in-place so os.walk does not descend
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith('.git')]
+        try:
+            entities, imports = analyze_ts_file(abs_path, grammar)
+        except Exception as exc:  # tree-sitter is lenient; guard anyway
+            parse_errors += 1
+            if verbose:
+                print(f'  ! parse failed {rel_file}: {exc}', file=sys.stderr)
+            entities, imports = [], []
 
-        src_files = [f for f in files if f.endswith(SOURCE_EXTS)
-                     and not f.endswith('.d.ts')]
-        if not src_files:
-            continue
-
-        # register this dir + all ancestors (only dirs that end up holding code)
-        _ensure_dir_chain(graph, rel_dir)
-
-        for fname in src_files:
-            abs_path = os.path.join(root, fname)
-            if os.path.islink(abs_path):
-                continue
-            rel_file = os.path.relpath(abs_path, repo_path).replace(os.sep, '/')
-            grammar = GRAMMAR_BY_EXT[os.path.splitext(fname)[1]]
-            try:
-                # bytes + lenient decode, matching analyze_ts_file -- a single
-                # stray non-UTF-8 byte (seen in the wild: a UTF-16 string chunk
-                # pasted into an otherwise-UTF-8 .tsx) must not drop the whole
-                # file from the graph. U+FFFD is 1 byte -> 1 char, so newline
-                # offsets stay aligned with tree-sitter's byte parse.
-                with open(abs_path, 'rb') as fh:
-                    content = fh.read().decode('utf-8', 'replace')
-            except OSError:
-                continue
-
-            try:
-                entities, imports = analyze_ts_file(abs_path, grammar)
-            except Exception as exc:  # tree-sitter is lenient; guard anyway
-                parse_errors += 1
-                if verbose:
-                    print(f'  ! parse failed {rel_file}: {exc}', file=sys.stderr)
-                entities, imports = [], []
-
-            files_seen += 1
-            graph.add_node(rel_file, type=NODE_TYPE_FILE, code=content, language=grammar)
-            graph.add_edge(rel_dir if rel_dir != '/' else '/', rel_file, type=EDGE_TYPE_CONTAINS)
-            file_imports[rel_file] = imports
-
-            for ent in entities:
-                nid = f'{rel_file}:{ent["name"]}'
-                graph.add_node(
-                    nid, type=ent['type'], code=ent['code'],
-                    start_line=ent['start_line'], end_line=ent['end_line'],
-                    parent_type=ent['parent_type'], skeleton=ent['skeleton'],
-                    is_component=ent['is_component'],
-                    _calls=ent['calls'], _renders=ent['renders'], _heritage=ent['heritage'],
-                )
-            for ent in entities:
-                nid = f'{rel_file}:{ent["name"]}'
-                parts = ent['name'].split('.')
-                if len(parts) == 1:
-                    graph.add_edge(rel_file, nid, type=EDGE_TYPE_CONTAINS)
-                else:
-                    parent_nid = f'{rel_file}:{".".join(parts[:-1])}'
-                    if graph.has_node(parent_nid):
-                        graph.add_edge(parent_nid, nid, type=EDGE_TYPE_CONTAINS)
-                    else:
-                        graph.add_edge(rel_file, nid, type=EDGE_TYPE_CONTAINS)
+        files_seen += 1
+        _graph_add_file(graph, rel_dir, rel_file, content, grammar, entities, imports)
+        file_imports[rel_file] = imports
 
     if verbose:
         print(f'  parsed {files_seen} files ({parse_errors} parse errors)')
 
     _add_import_edges(graph, repo_path, file_imports, verbose=verbose)
     _add_reference_edges(graph, file_imports, fuzzy_search=fuzzy_search, verbose=verbose)
-
-    # strip working attributes
-    for _, attrs in graph.nodes(data=True):
-        for k in ('_calls', '_renders', '_heritage'):
-            attrs.pop(k, None)
 
     return graph
 
@@ -648,8 +903,9 @@ def _ensure_dir_chain(graph: nx.MultiDiGraph, rel_dir: str) -> None:
             graph.add_edge(parent, d, type=EDGE_TYPE_CONTAINS)
 
 
-def _add_import_edges(graph, repo_path, file_imports, verbose=False):
-    alias_map = load_alias_map(repo_path)
+def _add_import_edges(graph, repo_path, file_imports, verbose=False, alias_map=None):
+    if alias_map is None:
+        alias_map = load_alias_map(repo_path)
     if verbose:
         print(f'  alias map: {alias_map or "{}"}')
     edges = 0
@@ -673,14 +929,18 @@ def _add_import_edges(graph, repo_path, file_imports, verbose=False):
         print(f'  imports edges: {edges}')
 
 
-def _add_reference_edges(graph, file_imports, fuzzy_search=True, verbose=False):
-    """`invokes`, `renders`, `inherits` -- all name-matched, disambiguated by
-    import binding then file scope."""
+def _add_reference_edges(graph, file_imports, fuzzy_search=False, verbose=False, only=None):
+    """`invokes`, `renders`, `inherits`, context edges -- all name-matched,
+    disambiguated by import binding then file scope.
+
+    ``only`` limits which files act as *callers* (used by the incremental patch);
+    the name/import indexes are always built from the whole graph, so the subset's
+    edges still resolve against every file in the repo."""
     # global name index: last-segment name -> [node_id]
     by_name: Dict[str, List[str]] = defaultdict(list)
     file_of: Dict[str, str] = {}
     for nid, attrs in graph.nodes(data=True):
-        if attrs.get('type') in (NODE_TYPE_CLASS, NODE_TYPE_FUNCTION):
+        if attrs.get('type') in (NODE_TYPE_CLASS, NODE_TYPE_FUNCTION, NODE_TYPE_CONTEXT):
             by_name[nid.split(':')[-1].split('.')[-1]].append(nid)
             file_of[nid] = nid.split(':')[0]
 
@@ -712,13 +972,19 @@ def _add_reference_edges(graph, file_imports, fuzzy_search=True, verbose=False):
         scoped = [c for c in cands if file_of.get(c) in allowed]
         if scoped:
             return scoped
-        # 3. nothing in scope -- global name match (heuristic, opt-in).
-        return cands if fuzzy_search else []
+        # 3. nothing in scope -- global name match. Only an exported entity, and
+        #    only when the name is not shared by a crowd of same-named entities
+        #    (that is the case that blew `invokes` up by 2 orders of magnitude).
+        if not fuzzy_search or len(cands) > _MAX_UNBOUND_FANOUT:
+            return []
+        return [c for c in cands if graph.nodes[c].get('is_exported')]
 
-    n_inv = n_ren = n_inh = 0
+    n_inv = n_ren = n_inh = n_ctx = 0
     for nid, attrs in list(graph.nodes(data=True)):
         ntype = attrs.get('type')
         if ntype not in (NODE_TYPE_CLASS, NODE_TYPE_FUNCTION):
+            continue
+        if only is not None and nid.split(':')[0] not in only:
             continue
 
         calls_by_name: Dict[str, List[int]] = defaultdict(list)
@@ -752,8 +1018,37 @@ def _add_reference_edges(graph, file_imports, fuzzy_search=True, verbose=False):
                     graph.add_edge(nid, tgt, type=EDGE_TYPE_INHERITS)
                     n_inh += 1
 
+        # React context flow. Both directions resolve the context object by the
+        # same import-binding precedence as calls, so a `BoardContext` imported
+        # from another file links to that file's node -- not to a same-named one.
+        consumed_by_name: Dict[str, List[int]] = defaultdict(list)
+        for c in attrs.get('_contexts', []):
+            consumed_by_name[c['name']].append(c['line'])
+        for ctx_name, lines in consumed_by_name.items():
+            for tgt in candidates(nid, ctx_name):
+                if tgt != nid and graph.nodes[tgt].get('type') == NODE_TYPE_CONTEXT:
+                    graph.add_edge(nid, tgt, type=EDGE_TYPE_CONSUMES_CONTEXT,
+                                   call_lines=sorted(set(lines))[:20])
+                    n_ctx += 1
+
+        provided_by_name: Dict[str, List[dict]] = defaultdict(list)
+        for p in attrs.get('_provides', []):
+            provided_by_name[p['name']].append(p)
+        for ctx_name, sites in provided_by_name.items():
+            for tgt in candidates(nid, ctx_name):
+                if tgt != nid and graph.nodes[tgt].get('type') == NODE_TYPE_CONTEXT:
+                    ordered = sorted(sites, key=lambda s: s['line'])
+                    graph.add_edge(
+                        nid, tgt, type=EDGE_TYPE_PROVIDES_CONTEXT,
+                        jsx_lines=sorted({s['line'] for s in sites})[:20],
+                        sites=[{'line': s['line'], 'props': s['props']}
+                               for s in ordered if s['props']][:8] or None,
+                    )
+                    n_ctx += 1
+
     if verbose:
-        print(f'  invokes edges: {n_inv}   renders edges: {n_ren}   inherits edges: {n_inh}')
+        print(f'  invokes edges: {n_inv}   renders edges: {n_ren}   inherits edges: {n_inh}'
+              f'   context edges: {n_ctx}')
 
 
 # ─────────────────────────────────  CLI  ──────────────────────────────────
@@ -773,6 +1068,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--repo', required=True, help='path to the repository root')
     ap.add_argument('--output', help='write the graph as a pickle to this path')
+    ap.add_argument('--fuzzy', action='store_true',
+                    help='also link by global bare-name match (exported, low fan-in '
+                         'targets only); off by default, import-scoped is exact')
     ap.add_argument('--quiet', action='store_true')
     args = ap.parse_args(argv)
 
@@ -781,7 +1079,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         ap.error(f'not a directory: {repo}')
 
     t0 = time.time()
-    graph = build_ts_graph(repo, verbose=not args.quiet)
+    graph = build_ts_graph(repo, fuzzy_search=args.fuzzy, verbose=not args.quiet)
     dt = time.time() - t0
 
     print(_stats(graph))
