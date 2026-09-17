@@ -629,8 +629,9 @@ def graph_traverse(entity_id: str = '', edge_types: Optional[List[str]] = None,
 @mcp.tool()
 def graph_edit(entity_id: str = '', operation: str = 'replace_in_node',
                replacement: str = '', old_str: str = '', new_str: str = '',
-               id: str = '', dry_run: bool = False) -> str:
-    """Edit ONE entity in the working tree, addressed by its graph id.
+               id: str = '', dry_run: bool = False,
+               edits: Optional[List[dict]] = None) -> str:
+    """Edit ONE entity in the working tree, addressed by its graph id, or a batch of them.
 
     Args:
         entity_id: graph id of the entity to change, as printed by graph_search
@@ -642,36 +643,109 @@ def graph_edit(entity_id: str = '', operation: str = 'replace_in_node',
         replacement: the new code, for replace_node / insert_*.
         old_str, new_str: the substring and its replacement, for replace_in_node.
         dry_run: report what would change without writing.
+        edits: a batch -- a list of {"entity_id", "operation", "replacement" |
+            "old_str"/"new_str"} objects applied in order in ONE call. A step that
+            changes several entities should be one call, not one call per edit: the
+            cost of this harness is round-trips, and each turn re-sends the context.
+            The batch stops at the first refusal and reports which edits were
+            already written, so a partial application is never silent. Use separate
+            calls only when the next edit depends on seeing the previous result.
 
-    Prefer "replace_in_node" for anything small: replacing a whole entity
-    rewrites code you did not read and the diff stops being reviewable.
+    Prefer "replace_in_node" for anything small: replacing a whole entity rewrites
+    code you did not read and the diff stops being reviewable.
 
     The write is REFUSED when it would make the file parse worse (tree-sitter
     ERROR nodes, own grammar per extension) or when the substring is not unique --
-    the file is left untouched. After a successful edit the graph is refreshed
-    and the report lists the entities that reference what you changed, so you can
-    fix the wiring that the edit just orphaned: `invokes` (callers), `renders`
-    (mount sites), `consumes_context` / `provides_context`.
+    the file is left untouched. After a successful edit the graph is refreshed and
+    the report lists the entities that reference what you changed, so you can fix
+    the wiring that the edit just orphaned: `invokes` (callers), `renders` (mount
+    sites), `consumes_context` / `provides_context`.
 
     Edits are disabled unless the server was started with LOCAGENT_ALLOW_EDITS=1:
     evidence is not authority, and this tool mutates the repository.
     """
+    if edits is not None:
+        return _graph_edit_batch(edits, dry_run=dry_run)
+    return _edit_one(entity_id=entity_id, operation=operation, replacement=replacement,
+                     old_str=old_str, new_str=new_str, id=id, dry_run=dry_run)[1]
+
+
+def _graph_edit_batch(edits: List[dict], dry_run: bool = False) -> str:
+    """Apply several entity edits in one round-trip.
+
+    Sequential and fail-fast: each edit is validated against the file as the
+    previous one left it (the entity is re-resolved by name on a fresh parse, so
+    line numbers cannot drift), and the first refusal stops the batch -- reporting
+    what was already written, because a partial application the caller cannot see
+    is worse than a failed one.
+
+    The reason this exists: measured on the opacity task, one edit per turn cost
+    417k input tokens against 58-63k for the text editor's ~1.8 edits per turn.
+    The expense was round-trips, not per-turn context, so the fix is to make N
+    edits fit in one call.
+    """
+    if not isinstance(edits, list) or not edits:
+        return 'edits tiene que ser una lista no vacía de operaciones'
+    written: List[str] = []
+    for index, edit in enumerate(edits, 1):
+        if not isinstance(edit, dict):
+            return f'edición {index}: se esperaba un objeto, llegó {type(edit).__name__}'
+        target = edit.get('entity_id') or edit.get('id') or ''
+        operation = edit.get('operation') or 'replace_in_node'
+        single = {k: v for k, v in edit.items() if k in
+                  ('replacement', 'old_str', 'new_str', 'dry_run')}
+        ok, out = _edit_one(entity_id=target, operation=operation, **single)
+        head = out.split('\n', 1)[0]
+        if not ok:
+            return ('lote detenido en la edición ' + str(index) + ' de ' + str(len(edits)) + ':\n'
+                    + out + ('\nYa escritas:\n  ' + '\n  '.join(written) if written
+                             else '\nNada se escribió.'))
+        written.append(f'{index}. {head}')
+    head = f'{len(written)} edición(es) en un lote' + (' [dry_run]' if dry_run else '')
+    return head + '\n' + '\n'.join(written) + '\n' + _batch_references(edits)
+
+
+def _batch_references(edits: List[dict]) -> str:
+    """Union of the references touched by a batch, so the caller sees the wiring
+    the whole step left misaligned instead of one entity's worth per call."""
+    g = _STATE.get('graph')
+    if g is None:
+        return ''
+    seen: List[Tuple[str, str, str]] = []
+    for edit in edits:
+        nid, _problem = _resolve_or_hint(edit.get('entity_id') or edit.get('id') or '')
+        if nid is None:
+            continue
+        for ref in _references_to(g, nid):
+            if ref not in seen:
+                seen.append(ref)
+    if not seen:
+        return ''
+    rows = ['referencias a revisar:'] + [f'  {e} ── {s}  {a}'.rstrip() for s, e, a in seen[:25]]
+    if len(seen) > 25:
+        rows.append(f'  ... {len(seen) - 25} más (graph_traverse para el resto)')
+    return '\n'.join(rows)
+
+
+def _edit_one(entity_id: str = '', operation: str = 'replace_in_node',
+             replacement: str = '', old_str: str = '', new_str: str = '',
+             id: str = '', dry_run: bool = False) -> Tuple[bool, str]:
     _ensure_loaded()
     if not _ALLOW_EDITS:
-        return ('edición deshabilitada: este servidor es de sólo lectura. '
-                'Reiniciá con LOCAGENT_ALLOW_EDITS=1 para habilitar graph_edit.')
+        return False, ('edición deshabilitada: este servidor es de sólo lectura. '
+                       'Reiniciá con LOCAGENT_ALLOW_EDITS=1 para habilitar graph_edit.')
     g = _STATE['graph']
     target = entity_id or id
     if not target:
-        return 'provide "entity_id" -- a node id from graph_search'
+        return False, 'provide "entity_id" -- a node id from graph_search'
     nid, problem = _resolve_or_hint(target)
     if nid is None:
-        return problem
+        return False, problem
     if ':' not in nid:
         kids = [v.split(':', 1)[1] for _, v, ed in g.out_edges(nid, data=True)
                 if ed.get('type') == 'contains' and ':' in v]
-        return (f'{nid} is a file, not an entity; edit one of its entities:\n'
-                + '\n'.join(f'  {nid}:{k}' for k in sorted(kids)[:20]))
+        return False, (f'{nid} is a file, not an entity; edit one of its entities:\n'
+                       + '\n'.join(f'  {nid}:{k}' for k in sorted(kids)[:20]))
 
     rel_file, name_path = nid.split(':', 1)
     before = _references_to(g, nid)
@@ -687,13 +761,13 @@ def graph_edit(entity_id: str = '', operation: str = 'replace_in_node',
             out.append('entidades en el archivo:')
             out += [f'  - {rel_file}:{c["name"]}  ({c["type"]}, L{c["start_line"]}-{c["end_line"]})'
                     for c in cands[:20]]
-        return '\n'.join(out)
+        return False, '\n'.join(out)
 
     head = (f'{nid}  [{operation}]  {result["detail"]}  '
             f'(sintaxis: {result["syntax_errors_after"]} errores)'
             + ('  [dry_run: nada escrito]' if dry_run else ''))
     if dry_run:
-        return head
+        return True, head
 
     _refresh()                      # line ranges and edges now describe the new file
     g = _STATE['graph']
@@ -711,7 +785,7 @@ def graph_edit(entity_id: str = '', operation: str = 'replace_in_node',
             out.append(f'  ... {len(affected) - 25} más (graph_traverse para el resto)')
     else:
         out.append('ninguna entidad referencia a esto (nada que recablear).')
-    return '\n'.join(out)
+    return True, '\n'.join(out)
 
 
 def describe_entities(ids: List[str]) -> List[dict]:
