@@ -84,9 +84,11 @@ from dependency_graph.ts_build_graph import (  # noqa: E402
 )
 from dependency_graph.traverse_graph import (  # noqa: E402
     RepoEntitySearcher,
+    _edge_annot,
     is_test_file,
     traverse_tree_structure,
 )
+from dependency_graph.ts_edit import edit_entity  # noqa: E402
 from plugins.location_tools.retriever.fuzzy_retriever import (  # noqa: E402
     fuzzy_retrieve_from_graph_nodes,
 )
@@ -103,6 +105,10 @@ CACHE_DIR = Path(os.environ['LOCAGENT_CACHE_DIR']).resolve() \
 # edges on a 3k-file repo. Opt in with LOCAGENT_FUZZY=1 for repos whose imports
 # the resolver cannot follow (barrel-heavy layouts).
 _FUZZY = os.environ.get('LOCAGENT_FUZZY', '').strip().lower() in ('1', 'true', 'yes')
+# graph_edit mutates the repository. Evidence is not authority: the server stays
+# read-only unless the operator opts in explicitly, so an agent that auto-discovers
+# the tools cannot write to a live checkout by accident.
+_ALLOW_EDITS = os.environ.get('LOCAGENT_ALLOW_EDITS', '').strip().lower() in ('1', 'true', 'yes')
 _CACHE_SCHEMA = 'v6'          # bump to invalidate all caches on a schema change
                              # v2: invokes/renders edges carry call-site lines + JSX props
                              # v3: renders/invokes disambiguated by import binding
@@ -329,6 +335,42 @@ def _file_outline(g, nid: str, n_lines: int, raw_skeleton: str) -> str:
             f'graph_get("{nid}:<Name>", "skeleton" | "full") for one.')
 
 
+def _missing_hint(g, raw: str) -> str:
+    """Message for an id that resolves to nothing. If the caller named a file,
+    answer with that file's entities instead of a bare "not found": the whole
+    point of an entity-addressed action space is that a wrong name is correctable
+    from the error."""
+    raw = raw.strip().strip('"\'`').replace('\\', '/')
+    file_part = raw.partition(':')[0]
+    nid, _sugg = _resolve_id(file_part) if file_part else (None, [])
+    if nid and g.nodes[nid].get('type') == NODE_TYPE_FILE:
+        rows = []
+        for _, v, ed in g.out_edges(nid, data=True):
+            if ed.get('type') != 'contains' or ':' not in v:
+                continue
+            name = v.split(':', 1)[1]
+            if '.' in name:            # nested entities -> via graph_get outline
+                continue
+            nd = g.nodes[v]
+            rows.append(f'  {nid}:{name}  ({nd.get("type")}, '
+                        f'L{nd.get("start_line")}-{nd.get("end_line")})')
+        if rows:
+            return (f'no entity {raw!r} in this repo, but {nid} defines:\n'
+                    + '\n'.join(rows[:20])
+                    + f'\n(use graph_get("{nid}") for the full outline, nested entities included)')
+    return f'no entity {raw!r} in this repo'
+
+
+def _resolve_or_hint(raw: str):
+    """``(nid, message)`` -- exactly one of the two is set."""
+    nid, sugg = _resolve_id(raw)
+    if nid is not None:
+        return nid, ''
+    if sugg:
+        return None, 'ambiguous / not found. did you mean:\n' + '\n'.join(f'  {s}' for s in sugg)
+    return None, _missing_hint(_STATE['graph'], raw)
+
+
 def _rrf(*ranked_lists: List[str], k: int = 60) -> List[str]:
     """Reciprocal-rank fusion of several ranked id lists."""
     score: dict = {}
@@ -446,11 +488,9 @@ def graph_get(entity_id: str = '', mode: str = 'skeleton', id: str = '') -> str:
     target = entity_id or id
     if not target:
         return 'provide "entity_id" -- a node id from graph_search'
-    nid, sugg = _resolve_id(target)
+    nid, problem = _resolve_or_hint(target)
     if nid is None:
-        if sugg:
-            return 'ambiguous / not found. did you mean:\n' + '\n'.join(f'  {s}' for s in sugg)
-        return f'no entity {target!r} in this repo'
+        return problem
 
     nd = g.nodes[nid]
     ntype = nd.get('type')
@@ -532,10 +572,9 @@ def graph_traverse(entity_id: str = '', edge_types: Optional[List[str]] = None,
     target = entity_id or id
     if not target:
         return 'provide "entity_id" -- a node id from graph_search'
-    nid, sugg = _resolve_id(target)
+    nid, problem = _resolve_or_hint(target)
     if nid is None:
-        return ('ambiguous / not found. candidates:\n' + '\n'.join(f'  {s}' for s in sugg)) \
-            if sugg else f'no entity {target!r} in this repo'
+        return problem
     if direction not in ('downstream', 'upstream', 'both'):
         return 'direction must be downstream | upstream | both'
     hops = max(1, min(hops, 4))
@@ -583,6 +622,104 @@ def graph_traverse(entity_id: str = '', edge_types: Optional[List[str]] = None,
     if len(tree) > _MAX_TRAVERSE_CHARS:
         tree = tree[:_MAX_TRAVERSE_CHARS] + '\n... (truncated; narrow edge_types or hops)'
     return f'{direction} from {nid} ({hops} hop(s)):\n```\n{tree}\n```'
+
+
+@mcp.tool()
+def graph_edit(entity_id: str = '', operation: str = 'replace_in_node',
+               replacement: str = '', old_str: str = '', new_str: str = '',
+               id: str = '', dry_run: bool = False) -> str:
+    """Edit ONE entity in the working tree, addressed by its graph id.
+
+    Args:
+        entity_id: graph id of the entity to change, as printed by graph_search
+            (e.g. "src/board/toolbars.tsx:ImageFormatToolbar"). `id` is an alias.
+        operation: one of "replace_in_node" (default; one unique substring inside
+            the entity), "replace_node" (the whole entity), "insert_before",
+            "insert_after", "delete_node".
+        replacement: the new code, for replace_node / insert_*.
+        old_str, new_str: the substring and its replacement, for replace_in_node.
+        dry_run: report what would change without writing.
+
+    Prefer "replace_in_node" for anything small: replacing a whole entity
+    rewrites code you did not read and the diff stops being reviewable.
+
+    The write is REFUSED when it would make the file parse worse (tree-sitter
+    ERROR nodes, own grammar per extension) or when the substring is not unique --
+    the file is left untouched. After a successful edit the graph is refreshed
+    and the report lists the entities that reference what you changed, so you can
+    fix the wiring that the edit just orphaned: `invokes` (callers), `renders`
+    (mount sites), `consumes_context` / `provides_context`.
+
+    Edits are disabled unless the server was started with LOCAGENT_ALLOW_EDITS=1:
+    evidence is not authority, and this tool mutates the repository.
+    """
+    _ensure_loaded()
+    if not _ALLOW_EDITS:
+        return ('edición deshabilitada: este servidor es de sólo lectura. '
+                'Reiniciá con LOCAGENT_ALLOW_EDITS=1 para habilitar graph_edit.')
+    g = _STATE['graph']
+    target = entity_id or id
+    if not target:
+        return 'provide "entity_id" -- a node id from graph_search'
+    nid, problem = _resolve_or_hint(target)
+    if nid is None:
+        return problem
+    if ':' not in nid:
+        kids = [v.split(':', 1)[1] for _, v, ed in g.out_edges(nid, data=True)
+                if ed.get('type') == 'contains' and ':' in v]
+        return (f'{nid} is a file, not an entity; edit one of its entities:\n'
+                + '\n'.join(f'  {nid}:{k}' for k in sorted(kids)[:20]))
+
+    rel_file, name_path = nid.split(':', 1)
+    before = _references_to(g, nid)
+
+    with _protect_stdout():
+        result = edit_entity(str(REPO), rel_file, name_path, operation,
+                             replacement=replacement, old_str=old_str, new_str=new_str,
+                             dry_run=dry_run)
+    if result['status'] != 'ok':
+        out = [f'no se editó nada: {result["message"]}']
+        cands = result.get('candidates') or []
+        if cands:
+            out.append('entidades en el archivo:')
+            out += [f'  - {rel_file}:{c["name"]}  ({c["type"]}, L{c["start_line"]}-{c["end_line"]})'
+                    for c in cands[:20]]
+        return '\n'.join(out)
+
+    head = (f'{nid}  [{operation}]  {result["detail"]}  '
+            f'(sintaxis: {result["syntax_errors_after"]} errores)'
+            + ('  [dry_run: nada escrito]' if dry_run else ''))
+    if dry_run:
+        return head
+
+    _refresh()                      # line ranges and edges now describe the new file
+    g = _STATE['graph']
+    out = [head]
+    if result['entity_gone']:
+        out.append(f'⚠ {name_path} ya no está definido en {rel_file}. '
+                   'Los sitios que lo referenciaban quedaron huérfanos:')
+    after_nid = f'{rel_file}:{name_path}'
+    affected = before if result['entity_gone'] else _references_to(g, after_nid)
+    if affected:
+        label = 'referencias (antes de la edición)' if result['entity_gone'] else 'referencias actuales'
+        out.append(f'{label} -- revisá el cableado:')
+        out += [f'  {etype} ── {src}  {annot}' for src, etype, annot in affected[:25]]
+        if len(affected) > 25:
+            out.append(f'  ... {len(affected) - 25} más (graph_traverse para el resto)')
+    else:
+        out.append('ninguna entidad referencia a esto (nada que recablear).')
+    return '\n'.join(out)
+
+
+def _references_to(g, nid: str) -> List[Tuple[str, str, str]]:
+    """Entities pointing at *nid*, with their edge type and site annotation."""
+    out = []
+    for src, _dst, ed in g.in_edges(nid, data=True):
+        etype = ed.get('type')
+        if etype in ('invokes', 'renders', 'consumes_context', 'provides_context',
+                     'inherits'):
+            out.append((src, etype, _edge_annot(ed).strip()))
+    return sorted(out)
 
 
 @mcp.tool()

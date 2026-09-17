@@ -24,6 +24,8 @@ New files:
                                               (JSONC tsconfig, extends chain, baseUrl)
   dependency_graph/ts_bm25.py               - self-contained BM25 index over graph nodes (bm25s)
   dependency_graph/ts_patch_check.py        - patch-vs-rebuild equivalence check (regression guard)
+  dependency_graph/ts_edit.py               - structured edits over graph-addressed AST entities
+  dependency_graph/ts_edit_check.py         - behaviour check for the edit layer (refusal cases)
   dependency_graph/queries/typescript.scm   - tree-sitter capture queries (typescript grammar)
   dependency_graph/queries/tsx.scm          - tsx-grammar deltas (JSX)
   plugins/location_tools/utils/compress_file_ts.py - tree-sitter skeletonizer (replaces the libcst one for TS)
@@ -56,6 +58,11 @@ Behavioural changes specific to the TS front end (the Python path is untouched):
     `provides_context` edges with call sites.
   - The graph keeps its per-node derivation attributes and per-file import list so a
     changed file can be re-derived in place; see docs/TYPESCRIPT_PORT_PLAN.md (v6).
+  - `graph_edit` mutates files, so the MCP server is read-only unless started with
+    LOCAGENT_ALLOW_EDITS=1. Its contract (named AST entities, teaching errors, small
+    changes via a unique substring, refusal to write code that does not parse) follows
+    CodeStruct (ACL 2026, Amazon); no code was copied from it -- it is licensed
+    CC-BY-NC-4.0. See docs/TYPESCRIPT_PORT_PLAN.md (v7).
 
 Reused from upstream without functional change:
   plugins/location_tools/retriever/fuzzy_retriever.py

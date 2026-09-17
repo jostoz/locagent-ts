@@ -657,6 +657,22 @@ Escaneo de frescura: 4-5 ms (miro) / 93-106 ms (DeskcommCRM) por tool call. Smok
 
 **Caveats nuevos:** el coste del patch es proporcional al *fan-in inverso* del archivo editado (hub = cientos de ms, no ms); el BM25 se reconstruye entero en el próximo `graph_search` (0.5 s miro / ~4 s DeskcommCRM) — diferido a propósito; el modo `--fuzzy` no es parcheable (el name-match global rompe la clausura → rebuild); `patch_ts_graph` exige `fuzzy_search=False`.
 
+## v7 (2026-09-16) — capa de edición estructurada (el sustituto de un espacio de acción tipo CodeAct)
+
+**Qué es.** `graph_edit` en el MCP + `dependency_graph/ts_edit.py`: se edita **una entidad direccionada por su id de grafo** (`path:Entidad` o `path:Clase.metodo`), no un span de texto. Operaciones: `replace_in_node` (una subcadena única dentro de la entidad — la que se prefiere), `replace_node`, `insert_before`, `insert_after`, `delete_node`, y `dry_run`.
+
+**De dónde viene el contrato.** De CodeStruct (ACL 2026, Amazon), cuyo artefacto se inspeccionó en `forge-platform/triad-integration/research/codestruct-vs-locagent-ts.md`. Se adoptó **el contrato, no el código** (aquel es CC-BY-NC-4.0): unidad = entidad AST con nombre; errores que enseñan; texto para cambios chicos, AST para entidades completas; operaciones acotadas; sin autoridad. Las diferencias son las que hacen falta en TS/React, y están medidas sobre el artefacto original: CodeStruct manda `.tsx` a la gramática `typescript` (294 nodos `ERROR` en `toolbars.tsx`, 1 selector de 10), su tabla de tipos no conoce `arrow_function` ni `variable_declarator` (`avatar.tsx` → 0 selectores), y su validación sintáctica es `python_ast.parse` sólo para `.py`.
+
+**Qué agrega sobre eso.** Gramática por extensión (`tsx` para `.tsx`), y **la escritura se rechaza** si el re-parse introduce nodos `ERROR`/`missing` que antes no estaban: nada se escribe a ciegas. Direccionamiento por identidad del grafo con nombres anidados (`useBoardImages.updateImageCrop`), que en un codebase de hooks es la mitad de las entidades.
+
+**Coherencia de cableado.** Tras una edición exitosa el grafo se refresca (parche incremental, ver v6) y el reporte lista quién referencia lo editado — `invokes`, `renders`, `consumes_context`, `provides_context`, con su `@L<línea>` — es decir, el conjunto de sitios que la edición acaba de dejar desalineados. Si la entidad desapareció (borrado o rename), lista las referencias **previas**, que son los huérfanos. Eso es lo que CodeStruct no puede dar y es exactamente lo que rompió el wiring dos veces en el estrés de opacidad.
+
+**Autoridad.** El servidor es de sólo lectura salvo `LOCAGENT_ALLOW_EDITS=1`. Evidencia ≠ autoridad, como fija `contracts/triad.md`; un agente que descubre las tools no puede escribir en un checkout vivo por accidente.
+
+**Verificación.** `python -m dependency_graph.ts_edit_check` → 8/8: escribe el cambio, toca una sola línea, rechaza `old_str` no único (archivo intacto), rechaza sintaxis rota (archivo intacto), entidad inexistente devuelve candidatos, entidad anidada por nombre punteado, `insert_after` visible para el índice, `delete_node` reporta `entity_gone`, `dry_run` no escribe. Smoke por stdio real sobre una copia de miro-clone (12/12): sin el flag no edita; `replace_in_node` sobre `cn` se aplica, el archivo cambia y el grafo lo refleja sin reiniciar el server; el reporte lista los `invokes` que referencian `cn`; una edición que rompe sintaxis se rechaza y el archivo queda intacto; `insert_after` aparece en `graph_search`.
+
+**Límite.** No propaga renombres ni hace transacciones multi-archivo: el reporte de referencias es para que el agente recablee, no lo hace por él.
+
 ## Riesgos / caveats
 
 - **`invokes` es heurístico por nombre** (sin tipos) — más ruidoso en TS. Desde v6 está acotado por binding de import (default) con fallback global gateado; el salto a tipos reales sigue siendo el híbrido con `tsserver`/`solidlsp`.
