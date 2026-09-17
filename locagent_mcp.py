@@ -770,6 +770,10 @@ def _edit_one(entity_id: str = '', operation: str = 'replace_in_node',
                              dry_run=dry_run, position=position)
     if result['status'] != 'ok':
         out = [f'no se editó nada: {result["message"]}']
+        if result.get('entity_text'):
+            out.append(f'texto ACTUAL de {rel_file}:{name_path} -- copiá de acá, no del '
+                       'paquete: el paquete se armó antes de tus ediciones de este step.')
+            out += result['entity_text'].split('\n')
         cands = result.get('candidates') or []
         if cands:
             out.append('entidades en el archivo:')

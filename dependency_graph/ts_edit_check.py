@@ -214,6 +214,33 @@ def run(verbose: bool = False, root: Optional[str] = None) -> int:
           out['status'] == 'ok' and _read(root, 'src/hooks/useCounter.ts').count('const reset =') == 2,
           out.get('message', '')[:90])
 
+    # 16. `old_str` que ya no existe: el error trae el texto ACTUAL de la entidad.
+    #     Es el caso medido en `gestado_ast_locagent__r1`: el paquete se genera antes de
+    #     las ediciones del step, así que el literal viejo no matchea y el llamante, sin
+    #     herramientas de lectura, adivina en bucle hasta agotar su presupuesto.
+    _write(root)
+    first = edit_entity(root, 'src/hooks/useCounter.ts', 'useCounter', 'replace_in_node',
+                        old_str='const reset = () => setValue(start);',
+                        new_str='const reset = () => setValue(start ?? 0);')
+    before = _read(root, 'src/hooks/useCounter.ts')
+    out = edit_entity(root, 'src/hooks/useCounter.ts', 'useCounter', 'replace_in_node',
+                      old_str='const reset = () => setValue(start);', new_str='x')
+    check('literal viejo -> rechazado con el texto actual de la entidad',
+          first['status'] == 'ok' and out['status'] == 'error'
+          and 'setValue(start ?? 0)' in (out.get('entity_text') or ''),
+          (out.get('entity_text') or 'sin entity_text').splitlines()[:1])
+    check('...y el archivo quedó intacto', _read(root, 'src/hooks/useCounter.ts') == before)
+
+    # 17. el rechazo por redeclaración también trae el texto actual, para poder pasar
+    #     a `replace_in_node` sobre el miembro que ya está.
+    _write(root)
+    out = edit_entity(root, 'src/hooks/useCounter.ts', 'useCounter', 'insert_member',
+                      replacement='const reset = () => 1;\n')
+    check('redeclaración -> trae el texto actual (para editar, no reinsertar)',
+          out['status'] == 'error' and 'const reset = () => setValue(start);'
+          in (out.get('entity_text') or ''),
+          (out.get('entity_text') or 'sin entity_text').splitlines()[:1])
+
     shutil.rmtree(root, ignore_errors=True)
     print(f'edit_check: {count - len(failures)}/{count} casos OK')
     return 1 if failures else 0

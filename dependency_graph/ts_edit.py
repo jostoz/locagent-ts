@@ -61,6 +61,10 @@ OPERATIONS = ('replace_in_node', 'insert_member', 'replace_node', 'insert_before
 
 _MAX_LISTED_CANDIDATES = 25
 
+# Cuántas líneas de la entidad se devuelven cuando una edición se rechaza: suficiente
+# para copiar el literal correcto, acotado para no llenar la ventana del llamante.
+_ENTITY_TEXT_MAX_LINES = 80
+
 
 def _syntax_errors(grammar: str, code: str) -> List[Tuple[int, str]]:
     """Every ERROR / missing node in *code*, as ``(line, node type)``."""
@@ -145,6 +149,26 @@ def _redeclarations(grammar: str, code: str) -> List[str]:
                     first[name] = line
         stack.extend(node.children)
     return sorted(out)
+
+
+def _entity_excerpt(lines: List[str], entity: dict,
+                    limit: int = _ENTITY_TEXT_MAX_LINES) -> str:
+    """The entity's **current** text, so a refused edit is corrected by copying
+    instead of guessing.
+
+    Medido en `opacity-guard-001` (unidad `gestado_ast_locagent__r1`): con el paquete
+    generado antes de las ediciones del propio step, el modelo buscó a ciegas un
+    `old_str` único en un archivo cuyo texto no tenía, gastó **21 llamadas** en ese
+    bucle, agotó el tope por step y el step siguiente --el que cerraba el wiring-- no
+    llegó a correr. Devolver el texto actual convierte el bucle en un paso correctivo.
+    """
+    start, end = entity['start_line'], entity['end_line']
+    body = lines[start - 1:end]
+    shown = body[:limit]
+    text = '\n'.join(shown)
+    if len(body) > len(shown):
+        text += f'\n... ({len(body) - len(shown)} línea(s) más)'
+    return text
 
 
 def _expand_tabs(text: str) -> str:
@@ -322,15 +346,19 @@ def edit_entity(repo_path: str, rel_file: str, name_path: str, operation: str,
 
     entity = matches[0]
     lines = code.split('\n')
+    # El texto vigente viaja en *todo* rechazo: el llamante acaba de intentar algo
+    # sobre esta entidad y lo que necesita para corregir es verla como está ahora.
+    entity_text = _entity_excerpt(lines, entity)
     try:
         applied = _apply(lines, entity, operation, replacement, old_str, new_str,
                          position=position)
     except ValueError as exc:
         return {'status': 'error', 'reason': 'operación inválida', 'message': str(exc),
-                'candidates': []}
+                'entity_text': entity_text, 'candidates': []}
     if applied is None:
         return {'status': 'error', 'reason': 'operación inválida',
-                'message': f'operación {operation!r} incompleta (¿falta replacement?)'}
+                'message': f'operación {operation!r} incompleta (¿falta replacement?)',
+                'entity_text': entity_text}
     new_lines, detail = applied
     new_code = '\n'.join(new_lines)
 
@@ -342,6 +370,7 @@ def edit_entity(repo_path: str, rel_file: str, name_path: str, operation: str,
                 'message': f'la edición introduciría {len(after_errors) - len(before_errors)} '
                            f'error(es) de sintaxis (primero en la línea {first[0]}). '
                            'No se escribió nada.',
+                'entity_text': entity_text,
                 'syntax_errors': after_errors[:5]}
 
     before_redeclarations = _redeclarations(grammar, code)
@@ -360,6 +389,7 @@ def edit_entity(repo_path: str, rel_file: str, name_path: str, operation: str,
                              'editá el existente con `replace_in_node`, o no hagas nada si ya '
                              'hace lo pedido.',
                 'redeclarations': after_redeclarations[:5],
+                'entity_text': entity_text,
                 'candidates': []}
 
     names_after: List[str] = []
