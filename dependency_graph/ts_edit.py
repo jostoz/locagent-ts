@@ -17,7 +17,11 @@ Operations, and when each is the right one:
 
     replace_in_node   one unique substring inside the entity -- small changes
     insert_member     a new member inside the entity's body (a field of an
-                      interface, a method of a class, a statement in a function)
+                      interface, a method of a class, a statement in a function).
+                      ``position='start'`` puts it at the top of the body, which is
+                      what a `const` referenced above its insertion point needs:
+                      the syntax check cannot see "used before declaration", that
+                      is tsc's job, so placement has to be sayable
     replace_node      the whole entity: new function, rewritten body
     insert_before     a new entity above the target, at the target's indent
     insert_after      a new entity below the target
@@ -114,7 +118,8 @@ def find_entity(abs_path: str, grammar: str, name_path: str) -> List[dict]:
 
 
 def _apply(lines: List[str], entity: dict, operation: str, replacement: str,
-           old_str: str, new_str: str) -> Optional[Tuple[List[str], str]]:
+           old_str: str, new_str: str,
+           position: str = 'end') -> Optional[Tuple[List[str], str]]:
     """Return ``(new_lines, detail)`` or ``None`` when the operation is invalid."""
     start, end = entity['start_line'], entity['end_line']
     indent = _entity_indent(lines, start, end)
@@ -148,7 +153,10 @@ def _apply(lines: List[str], entity: dict, operation: str, replacement: str,
         new_members = _reindent(replacement, member_indent)
         if not new_members:
             raise ValueError('replacement no contiene código')
-        # justo antes de la llave de cierre del cuerpo
+        if position == 'start':      # al comienzo del cuerpo, tras la llave de apertura
+            return (lines[:body_start] + new_members + lines[body_start:],
+                    f'{len(new_members)} línea(s) insertadas al inicio del cuerpo')
+        # justo antes de la llave de cierre del cuerpo (por defecto)
         return (lines[:body_end - 1] + new_members + lines[body_end - 1:],
                 f'{len(new_members)} línea(s) insertadas en el cuerpo')
 
@@ -181,7 +189,7 @@ def _apply(lines: List[str], entity: dict, operation: str, replacement: str,
 
 def edit_entity(repo_path: str, rel_file: str, name_path: str, operation: str,
                 replacement: str = '', old_str: str = '', new_str: str = '',
-                dry_run: bool = False) -> Dict[str, object]:
+                dry_run: bool = False, position: str = 'end') -> Dict[str, object]:
     """Apply *operation* to the entity *name_path* inside *rel_file*.
 
     Returns ``{'status': 'ok'|'error', ...}``. On ``error`` the file is
@@ -217,7 +225,8 @@ def edit_entity(repo_path: str, rel_file: str, name_path: str, operation: str,
     entity = matches[0]
     lines = code.split('\n')
     try:
-        applied = _apply(lines, entity, operation, replacement, old_str, new_str)
+        applied = _apply(lines, entity, operation, replacement, old_str, new_str,
+                         position=position)
     except ValueError as exc:
         return {'status': 'error', 'reason': 'operación inválida', 'message': str(exc),
                 'candidates': []}

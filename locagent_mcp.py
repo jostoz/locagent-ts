@@ -630,6 +630,7 @@ def graph_traverse(entity_id: str = '', edge_types: Optional[List[str]] = None,
 def graph_edit(entity_id: str = '', operation: str = 'replace_in_node',
                replacement: str = '', old_str: str = '', new_str: str = '',
                id: str = '', dry_run: bool = False,
+               position: str = 'end',
                edits: Optional[List[dict]] = None) -> str:
     """Edit ONE entity in the working tree, addressed by its graph id, or a batch of them.
 
@@ -643,6 +644,11 @@ def graph_edit(entity_id: str = '', operation: str = 'replace_in_node',
         replacement: the new code, for replace_node / insert_*.
         old_str, new_str: the substring and its replacement, for replace_in_node.
         dry_run: report what would change without writing.
+        position: for "insert_member", "end" (default; just before the closing
+            brace) or "start" (top of the body). Use "start" when the body already
+            references the new member above its insertion point: the syntax gate
+            cannot see "used before declaration" -- that is tsc's job -- so the
+            placement has to be sayable.
         edits: a batch -- a list of {"entity_id", "operation", "replacement" |
             "old_str"/"new_str"} objects applied in order in ONE call. A step that
             changes several entities should be one call, not one call per edit: the
@@ -667,7 +673,8 @@ def graph_edit(entity_id: str = '', operation: str = 'replace_in_node',
     if edits is not None:
         return _graph_edit_batch(edits, dry_run=dry_run)
     return _edit_one(entity_id=entity_id, operation=operation, replacement=replacement,
-                     old_str=old_str, new_str=new_str, id=id, dry_run=dry_run)[1]
+                     old_str=old_str, new_str=new_str, id=id, dry_run=dry_run,
+                     position=position)[1]
 
 
 def _graph_edit_batch(edits: List[dict], dry_run: bool = False) -> str:
@@ -693,7 +700,7 @@ def _graph_edit_batch(edits: List[dict], dry_run: bool = False) -> str:
         target = edit.get('entity_id') or edit.get('id') or ''
         operation = edit.get('operation') or 'replace_in_node'
         single = {k: v for k, v in edit.items() if k in
-                  ('replacement', 'old_str', 'new_str', 'dry_run')}
+                  ('replacement', 'old_str', 'new_str', 'dry_run', 'position')}
         ok, out = _edit_one(entity_id=target, operation=operation, **single)
         head = out.split('\n', 1)[0]
         if not ok:
@@ -729,7 +736,8 @@ def _batch_references(edits: List[dict]) -> str:
 
 def _edit_one(entity_id: str = '', operation: str = 'replace_in_node',
              replacement: str = '', old_str: str = '', new_str: str = '',
-             id: str = '', dry_run: bool = False) -> Tuple[bool, str]:
+             id: str = '', dry_run: bool = False,
+             position: str = 'end') -> Tuple[bool, str]:
     _ensure_loaded()
     if not _ALLOW_EDITS:
         return False, ('edición deshabilitada: este servidor es de sólo lectura. '
@@ -753,7 +761,7 @@ def _edit_one(entity_id: str = '', operation: str = 'replace_in_node',
     with _protect_stdout():
         result = edit_entity(str(REPO), rel_file, name_path, operation,
                              replacement=replacement, old_str=old_str, new_str=new_str,
-                             dry_run=dry_run)
+                             dry_run=dry_run, position=position)
     if result['status'] != 'ok':
         out = [f'no se editó nada: {result["message"]}']
         cands = result.get('candidates') or []

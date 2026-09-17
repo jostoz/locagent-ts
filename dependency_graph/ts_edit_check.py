@@ -153,8 +153,19 @@ def run(verbose: bool = False, root: Optional[str] = None) -> int:
           and 'cuerpo de miembros' in out['message'], out.get('message', '')[:90])
     check('...y el archivo quedó intacto', _read(root, 'src/types.ts') == before)
 
+    # 11. insert_member position='start': lo que el cuerpo ya referencia arriba
+    _write(root)
+    out = edit_entity(root, 'src/hooks/useCounter.ts', 'useCounter', 'insert_member',
+                      replacement='const doubled = value * 2;\n', position='start')
+    text = _read(root, 'src/hooks/useCounter.ts')
+    decl = next(i for i, l in enumerate(text.splitlines()) if 'export function useCounter' in l)
+    first_member = text.splitlines()[decl + 1]
+    check("insert_member position='start' entra al comienzo del cuerpo",
+          out['status'] == 'ok' and 'doubled' in first_member, first_member.strip()[:60])
+    check('...y con la indentación de los miembros', first_member.startswith('  const'), repr(first_member[:22]))
+
     shutil.rmtree(root, ignore_errors=True)
-    total = 12
+    total = 14
     print(f'edit_check: {total - failures.__len__()}/{total} casos OK')
     return 1 if failures else 0
 
