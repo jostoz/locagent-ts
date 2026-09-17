@@ -714,6 +714,34 @@ def graph_edit(entity_id: str = '', operation: str = 'replace_in_node',
     return '\n'.join(out)
 
 
+def describe_entities(ids: List[str]) -> List[dict]:
+    """Address cards for programmatic callers (a planner, an eval harness).
+
+    Not a tool: this is the addressing half of the structured action space, exposed
+    so a caller can hand an agent the exact ids it is allowed to edit. Each card
+    says whether the entity exists, what it is, its line range, whether it has a
+    member body an ``insert_member`` could target, and -- when it does not exist --
+    what the file does define, so the caller never has to guess.
+    """
+    _ensure_loaded()
+    g = _STATE['graph']
+    cards = []
+    for raw in ids:
+        nid, problem = _resolve_or_hint(raw)
+        if nid is None or ':' not in nid:
+            cards.append({'id': raw, 'found': False, 'hint': problem})
+            continue
+        nd = g.nodes[nid]
+        cards.append({'id': nid, 'found': True, 'type': nd.get('type'),
+                      'ts_kind': nd.get('ts_kind'),
+                      'is_component': bool(nd.get('is_component')),
+                      'line_start': nd.get('start_line'), 'line_end': nd.get('end_line'),
+                      'member_body': nd.get('member_body'),
+                      'signature': (nd.get('skeleton') or '').splitlines()[0][:160]
+                      if nd.get('skeleton') else None})
+    return cards
+
+
 def _references_to(g, nid: str) -> List[Tuple[str, str, str]]:
     """Entities pointing at *nid*, with their edge type and site annotation."""
     out = []

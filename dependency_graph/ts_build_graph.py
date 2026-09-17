@@ -278,7 +278,11 @@ def _effective_body(node):
     return node
 
 
-_MEMBER_BODY_TYPES = ('object_type', 'class_body', 'interface_body', 'enum_body')
+# Bodies a member can be inserted into: an interface's fields, a class's methods,
+# and a function's statements -- a hook that must gain an updater is a function, and
+# without this the structured editor could only rewrite the whole 170-line hook.
+_MEMBER_BODY_TYPES = ('object_type', 'class_body', 'interface_body', 'enum_body',
+                      'statement_block')
 
 
 def _member_body_lines(node) -> Tuple[Optional[int], Optional[int]]:
