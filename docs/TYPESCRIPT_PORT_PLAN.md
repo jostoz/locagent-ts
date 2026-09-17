@@ -737,9 +737,36 @@ a pedir el "updater" que el step 1 ya entregó. El guard impide **escribir** el 
 **pedirlo**; eso cambia una constante del arnés y se verifica en una corrida aparte
 (rastreado en `forge-platform/triad-integration/PENDING.md`, ítem 9).
 
-**Efecto verificado en un agente real:** corrida `opacity-guard-001` (3 unidades, pin
-`4588dce`), con la predicción registrada antes del resultado en el §8 de
-`forge-platform/triad-integration/research/falla-residual-redeclaracion.md`.
+**Efecto medido en un agente real (parcial, no aislado).** Corrida `opacity-guard-001`
+(3 unidades, pin `4588dce`): la firma de redeclaración está **ausente** del archivo de la
+unidad que llegó a editar ese hook, pero esa unidad murió en el tope de herramientas por step
+antes de los gates (`tsc_product: null`), la segunda fue un flake de red, y la tercera salió
+verde igual que el registro previo — así que el guard **no queda aislado** por esa corrida.
+Informe con la cadena causal completa:
+`forge-platform/triad-integration/research/falla-residual-redeclaracion.md` §8-bis.
+
+## v10 (2026-09-17) — el rechazo devuelve el texto vigente, no sólo la negativa
+
+**De dónde sale.** De `opacity-guard-001`: el step 2 editó `src/board/Board.tsx`, **cuyo
+texto no estaba en su slice**; ciego, buscó un `old_str` único **21 veces** (20-390 bytes
+por llamada), agotó el tope de 20 llamadas del step y el step siguiente —el que cerraba el
+wiring— nunca corrió (`state_board_callsite_wiring: false`). El paquete se arma **antes** de
+las ediciones del step, así que el literal copiado deja de matchear en cuanto el modelo
+edita la entidad.
+
+**Qué cambia.** `edit_entity` adjunta `entity_text` —texto vigente de la entidad, acotado a
+80 líneas— a *todo* rechazo (operación inválida, sintaxis, redeclaración, `replacement`
+faltante), y `graph_edit` lo presenta con la instrucción explícita de copiar de ahí y no del
+paquete.
+
+**Verificación.** `ts_edit_check` **25/25** (v9: 22/22). Contra el código previo, **23/25**:
+los dos casos nuevos —literal viejo devuelve el texto actual, y el rechazo por redeclaración
+también— fallan sin el cambio. `ts_patch_check` 6/6.
+
+**Lo que no arregla.** Que el modelo trabaje fuera de su slice sigue siendo posible; esto
+convierte el bucle ciego en un paso correctivo. La mitad de arnés —que el slice contenga el
+texto que el objetivo del step puede exigir, y que el paquete se regenere después de las
+ediciones del step— está rastreada en `forge-platform/triad-integration/PENDING.md`.
 
 ## Riesgos / caveats
 
