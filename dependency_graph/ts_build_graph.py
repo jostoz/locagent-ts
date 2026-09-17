@@ -292,6 +292,12 @@ def _member_body_lines(node) -> Tuple[Optional[int], Optional[int]]:
     rather than guessing where a member would belong."""
     body = node.child_by_field_name('body')
     if body is None or body.type not in _MEMBER_BODY_TYPES:
+        # `const C = forwardRef(fn)` / `memo(observer(fn))`: the body belongs to the
+        # wrapped function, and a component wrapped that way still has one.
+        inner = _effective_body(node)
+        if inner is not node:
+            body = inner.child_by_field_name('body')
+    if body is None or body.type not in _MEMBER_BODY_TYPES:
         return None, None
     return body.start_point[0] + 1, body.end_point[0] + 1
 
