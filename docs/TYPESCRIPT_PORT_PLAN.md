@@ -589,6 +589,10 @@ trackeado (`AGENTS.md`, `contracts/`, `scripts/`, `state/`, 16 tareas
   PAIOS — granularidad: ¿un packet por tarea del corpus, o uno por paso del
   plan (`TASK-e6-step1`, `TASK-e6-step2`, ...)? Confirmar contra la semántica
   real de `claim.sh`/`verify.sh`, no asumir.
+  **Resuelto para el caso de opacidad (2026-09-17):** un packet por tarea con steps
+  internos — un packet por step permitiría aceptar piezas sin verificar el wiring final
+  (ver `forge-platform/triad-integration/evals/opacity/proposal.md`). La pregunta general
+  de Stage 2 sigue abierta.
 - Si `claim.sh`/`verify.sh` necesitan adaptación para un rol builder que
   corre aislado (`eval/isolated_env.py`, `run_commands` deshabilitado a nivel
   de tool-schema, MCP solo-`locagent`).
@@ -686,6 +690,56 @@ Escaneo de frescura: 4-5 ms (miro) / 93-106 ms (DeskcommCRM) por tool call. Smok
 **El límite que el lote destapó.** La corrida batcheada falló con `TS2448: 'updateImageOpacity' used before its declaration`: el modelo insertó la declaración al final del cuerpo y la referencia en el `return {...}` de más arriba. El chequeo de sintaxis **no puede** ver eso — es un error semántico, no de sintaxis — y por eso `insert_member` ganó `position`, para que la colocación sea *decible* en vez de adivinada. Es la frontera del gate: valida que el archivo parsee con la gramática correcta, no que el programa tenga sentido; eso lo dice `tsc`.
 
 Verificación del motor: `ts_edit_check` 14/14 (incluye los dos rechazos que dejan el archivo intacto, entidad inexistente → candidatos, anidada por nombre punteado, `position='start'`, `dry_run`), `ts_patch_check` 6/6, y telemetría de lote visible para el audit (`operation: batch`, cantidad, operaciones, entidades).
+
+## v9 (2026-09-17) — rechazo de redeclaración: el gate que el brazo de texto no puede tener
+
+**De dónde sale.** De una medición, no de un diseño. En la matriz de mecanismo de la
+evaluación de opacidad (`opacity-mechanism-004`, 6 unidades) cinco unidades rojas dejaron
+**dos** firmas, y cuatro de ellas la *misma* firma en el *mismo* archivo bajo **los dos**
+mecanismos de edición:
+
+```
+TS2451: Cannot redeclare block-scoped variable 'updateImageOpacity'.              x2  src/board/useBoardImages.ts
+TS1117: An object literal cannot have multiple properties with the same name.     x1  src/board/useBoardImages.ts
+```
+
+Los checkouts rojos lo confirman textualmente (declaración en las líneas 223 y 264,
+propiedad devuelta en 281 y 286) y el verde no tiene ninguna. La causa: el step 3 vuelve a
+insertar lo que el step 1 ya había escrito, y el gate de sintaxis **no puede verlo** — el
+archivo parsea perfecto y `tsc` falla después, con la unidad ya gastada.
+
+**Qué hace.** Antes de escribir, `edit_entity` escanea los **ámbitos** del archivo antes y
+después del cambio y **rechaza sin escribir** cuando el cambio agrega una repetición,
+nombrando el símbolo y la línea donde ya estaba. Alcance deliberadamente estrecho: sólo lo
+que TypeScript garantiza que es error —
+
+- nombre ligado repetido dentro del mismo bloque (`TS2451`), con `program` incluido para
+  las declaraciones de módulo (los `export` se desenvuelven: la declaración es hija del
+  export, no del programa);
+- clave repetida dentro del mismo objeto literal (`TS1117`), incluida
+  `shorthand_property_identifier` — que es la forma exacta que tomó esta falla en el
+  `return {…}` del hook.
+
+Los miembros de clase e interfaz quedan **fuera** a propósito: ahí repetir el nombre es
+legal si el tipo coincide (merging, overloads) y sólo el chequeo de tipos puede decidirlo.
+Un rechazo tiene que ser *correcto*, no aproximado — un falso positivo bloquea trabajo
+legítimo.
+
+**Verificación.** `python -m dependency_graph.ts_edit_check`: **22/22** (v8 decía 14/14; los
+casos nuevos son 13-15). Contra el código previo, **18/22**: sin el guard fallan los cuatro
+asserts nuevos, incluidos los dos "el archivo quedó intacto". El caso de falso positivo
+—mismo nombre en dos bloques distintos— pasa. `ts_patch_check` 6/6. Archivos:
+`dependency_graph/ts_edit.py`, `dependency_graph/ts_edit_check.py` y el docstring de la tool
+en `locagent_mcp.py`.
+
+**Lo que NO arregla.** La otra mitad de la causa raíz es la *instrucción*: el step 3 vuelve
+a pedir el "updater" que el step 1 ya entregó. El guard impide **escribir** el duplicado, no
+**pedirlo**; eso cambia una constante del arnés y se verifica en una corrida aparte
+(rastreado en `forge-platform/triad-integration/PENDING.md`, ítem 9).
+
+**Efecto verificado en un agente real:** corrida `opacity-guard-001` (3 unidades, pin
+`4588dce`), con la predicción registrada antes del resultado en el §8 de
+`forge-platform/triad-integration/research/falla-residual-redeclaracion.md`.
 
 ## Riesgos / caveats
 
