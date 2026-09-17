@@ -69,8 +69,11 @@ def _read(root: str, rel: str) -> str:
 def run(verbose: bool = False, root: Optional[str] = None) -> int:
     root = root or os.path.join(tempfile.gettempdir(), 'locagent-ts-edit-check')
     failures: List[str] = []
+    count = 0
 
     def check(label: str, condition: bool, detail: str = '') -> None:
+        nonlocal count
+        count += 1
         print(f'[{"OK " if condition else "FAIL"}] {label}' + (f'  {detail}' if detail else ''))
         if not condition:
             failures.append(label)
@@ -180,9 +183,39 @@ def run(verbose: bool = False, root: Optional[str] = None) -> int:
           out['status'] == 'ok' and 'reset' in text.splitlines()[decl + 1]
           and 'no se hoistea' in out.get('detail', ''), out.get('detail', '')[:80])
 
+    # 13. redeclaración dentro del mismo bloque -> rechazada (TS2451), sin escribir
+    _write(root)
+    before = _read(root, 'src/hooks/useCounter.ts')
+    out = edit_entity(root, 'src/hooks/useCounter.ts', 'useCounter', 'insert_member',
+                      replacement='const reset = () => 1;\n')
+    check('insert_member que redeclara un `const` del cuerpo -> rechazado',
+          out['status'] == 'error' and out['reason'] == 'redeclaración',
+          out.get('message', '')[:100])
+    check('...y el archivo quedó intacto', _read(root, 'src/hooks/useCounter.ts') == before)
+
+    # 14. clave repetida en el objeto literal -> rechazada (TS1117): la firma real
+    #     medida en `gestado_ast__r1` (el `return {...}` de un hook exponiendo el
+    #     mismo updater dos veces), que el gate de sintaxis deja pasar.
+    _write(root)
+    before = _read(root, 'src/hooks/useCounter.ts')
+    out = edit_entity(root, 'src/hooks/useCounter.ts', 'useCounter', 'replace_in_node',
+                      old_str='increment, reset', new_str='increment, reset, reset')
+    check('replace_in_node que repite una clave del objeto -> rechazado',
+          out['status'] == 'error' and out['reason'] == 'redeclaración'
+          and 'objeto literal' in out['message'], out.get('message', '')[:100])
+    check('...y el archivo quedó intacto', _read(root, 'src/hooks/useCounter.ts') == before)
+
+    # 15. el mismo nombre en dos bloques distintos es legal y no se rechaza
+    _write(root)
+    out = edit_entity(root, 'src/hooks/useCounter.ts', 'useCounter', 'insert_after',
+                      replacement='export function useOther(start: number) {\n'
+                                  '  const reset = () => start;\n  return reset;\n}\n')
+    check('mismo nombre en otro bloque -> permitido (sin falso positivo)',
+          out['status'] == 'ok' and _read(root, 'src/hooks/useCounter.ts').count('const reset =') == 2,
+          out.get('message', '')[:90])
+
     shutil.rmtree(root, ignore_errors=True)
-    total = 15
-    print(f'edit_check: {total - failures.__len__()}/{total} casos OK')
+    print(f'edit_check: {count - len(failures)}/{count} casos OK')
     return 1 if failures else 0
 
 

@@ -30,6 +30,12 @@ Operations, and when each is the right one:
     insert_after      a new entity below the target
     delete_node       the whole entity, including its leading comment block
 
+An edit is also refused when it would redeclare a name TypeScript is guaranteed to
+reject: a binding repeated inside the same block (``TS2451``) or a key repeated
+inside the same object literal (``TS1117``). The syntax gate cannot see either --
+the file parses fine -- so without this gate the caller only finds out one gate
+later, from ``tsc``, and the write has to be undone by hand.
+
 Prefer ``replace_in_node`` for anything small: replacing a whole entity rewrites
 code the caller did not read, and the diff stops being reviewable.
 
@@ -65,6 +71,78 @@ def _syntax_errors(grammar: str, code: str) -> List[Tuple[int, str]]:
         node = stack.pop()
         if node.type == 'ERROR' or node.is_missing:
             out.append((node.start_point[0] + 1, node.type))
+        stack.extend(node.children)
+    return sorted(out)
+
+
+# Ámbitos donde TypeScript garantiza que repetir un nombre es un error: los bloques
+# (TS2451 "Cannot redeclare block-scoped variable") y los objetos literales (TS1117
+# "An object literal cannot have multiple properties with the same name"). Los
+# miembros de clase e interfaz quedan fuera a propósito: ahí repetir el nombre es
+# legal si el tipo coincide (merging, overloads), y sólo el chequeo de tipos puede
+# decidirlo -- el árbol no. Un rechazo tiene que ser correcto, no aproximado.
+_SCOPE_TYPES = frozenset(('program', 'statement_block', 'object'))
+_DECLARATION_TYPES = frozenset((
+    'function_declaration', 'class_declaration', 'abstract_class_declaration',
+    'interface_declaration', 'type_alias_declaration', 'enum_declaration',
+    'function_signature', 'method_definition',
+))
+
+
+def _declaration_names(node, out: List[Tuple[str, int]]) -> None:
+    """Append what *node* binds, walking one level into ``export_statement``: an
+    exported declaration is a child of the export, not of the program, and those
+    are the names that collide at module scope."""
+    kind = node.type
+    if kind in ('lexical_declaration', 'variable_declaration'):
+        for declarator in node.children:
+            if declarator.type != 'variable_declarator':
+                continue
+            name = declarator.child_by_field_name('name')
+            if name is not None and name.type == 'identifier':
+                out.append((name.text.decode('utf8'), name.start_point[0] + 1))
+    elif kind in _DECLARATION_TYPES:
+        name = node.child_by_field_name('name')
+        if name is not None:
+            out.append((name.text.decode('utf8'), name.start_point[0] + 1))
+    elif kind == 'pair':                       # clave de un objeto literal
+        key = node.child_by_field_name('key')
+        if key is not None and key.type in ('property_identifier', 'identifier', 'string'):
+            out.append((key.text.decode('utf8').strip('"\''), key.start_point[0] + 1))
+    elif kind == 'shorthand_property_identifier':
+        # `return { …, updateImageOpacity, …, updateImageOpacity }` -- un hook que
+        # expone el mismo updater dos veces es TS1117, y el nodo no es un `pair`.
+        out.append((node.text.decode('utf8'), node.start_point[0] + 1))
+    elif kind == 'export_statement':
+        for child in node.children:
+            _declaration_names(child, out)
+
+
+def _redeclarations(grammar: str, code: str) -> List[str]:
+    """Repetitions TypeScript is guaranteed to reject, as readable text.
+
+    Decided per *scope*, not per file: ``const x`` in two different blocks is legal
+    and ``{a: 1, a: 2}`` is not. Unrepeated declarations say nothing -- what matters
+    before writing is whether the edit *adds* a repetition that was not there.
+    """
+    tree = get_parser(grammar).parse(bytes(code, 'utf8'))
+    out: List[str] = []
+    stack = [tree.root_node]
+    while stack:
+        node = stack.pop()
+        if node.type in _SCOPE_TYPES:
+            first: Dict[str, int] = {}
+            names: List[Tuple[str, int]] = []
+            for child in node.children:
+                _declaration_names(child, names)
+            for name, line in names:
+                if name in first:
+                    where = ('clave repetida en el objeto literal' if node.type == 'object'
+                             else 'nombre redeclarado en el mismo bloque')
+                    out.append(f'`{name}`: {where} (ya en la línea {first[name]}, '
+                               f'de nuevo en la {line})')
+                else:
+                    first[name] = line
         stack.extend(node.children)
     return sorted(out)
 
@@ -265,6 +343,24 @@ def edit_entity(repo_path: str, rel_file: str, name_path: str, operation: str,
                            f'error(es) de sintaxis (primero en la línea {first[0]}). '
                            'No se escribió nada.',
                 'syntax_errors': after_errors[:5]}
+
+    before_redeclarations = _redeclarations(grammar, code)
+    after_redeclarations = _redeclarations(grammar, new_code)
+    if len(after_redeclarations) > len(before_redeclarations):
+        # El gate de sintaxis no puede ver esto: el archivo parsea perfecto y aun así
+        # tsc lo rechaza (medido en la unidad `gestado_ast__r1`: el step 3 insertó por
+        # segunda vez `updateImageOpacity` en el mismo cuerpo, y el gate de sintaxis lo
+        # dejó pasar). Acá el AST sí sabe más que el texto: si el nombre ya está ligado
+        # en ese ámbito, escribir es un error garantizado, no una apuesta.
+        added = [r for r in after_redeclarations if r not in before_redeclarations]
+        return {'status': 'error', 'reason': 'redeclaración',
+                'message': 'la edición redeclararía algo que TypeScript rechaza: '
+                           + '; '.join(added or after_redeclarations)
+                           + '. No se escribió nada. Si el miembro ya existe, no lo insertes: '
+                             'editá el existente con `replace_in_node`, o no hagas nada si ya '
+                             'hace lo pedido.',
+                'redeclarations': after_redeclarations[:5],
+                'candidates': []}
 
     names_after: List[str] = []
     if not dry_run:

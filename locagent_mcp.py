@@ -662,7 +662,13 @@ def graph_edit(entity_id: str = '', operation: str = 'replace_in_node',
 
     The write is REFUSED when it would make the file parse worse (tree-sitter
     ERROR nodes, own grammar per extension) or when the substring is not unique --
-    the file is left untouched. After a successful edit the graph is refreshed and
+    the file is left untouched. It is also refused when the edit would redeclare a
+    name TypeScript rejects: a binding repeated in the same block (TS2451) or a key
+    repeated in the same object literal (TS1117). The syntax gate cannot see those
+    -- the file parses fine -- so if the member already exists, edit it with
+    "replace_in_node" instead of inserting it again.
+
+    After a successful edit the graph is refreshed and
     the report lists the entities that reference what you changed, so you can fix
     the wiring that the edit just orphaned: `invokes` (callers), `renders` (mount
     sites), `consumes_context` / `provides_context`.
