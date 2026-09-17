@@ -673,6 +673,20 @@ Escaneo de frescura: 4-5 ms (miro) / 93-106 ms (DeskcommCRM) por tool call. Smok
 
 **Límite.** No propaga renombres ni hace transacciones multi-archivo: el reporte de referencias es para que el agente recablee, no lo hace por él.
 
+## v8 (2026-09-16) — la edición estructurada, medida dentro de un agente
+
+**Qué se integró.** Un agente real (Cline Core, modelo local) editando **sólo** por AST: `graph_edit` es su única herramienta de escritura, con el editor de texto, la lectura, la búsqueda y el shell denegados. Para que eso fuera posible hubo que cerrar tres huecos del motor:
+
+- **Interfaces y alias como entidades** (`ts_kind: interface|type`): sin ellas, "agregá `opacity` a `interface BoardImage`" era inexpresable como edición de entidad. Medido: 140 en miro-clone.
+- **`insert_member`**, que escribe *dentro* del cuerpo de la entidad (campo de interfaz, método, sentencia), con la indentación de los miembros, y con **`position="start"`** además del final por defecto.
+- **`describe_entities(ids)`**, función pública y no tool: devuelve la tarjeta de dirección de cada id para que un planner pueda entregarle al agente exactamente lo que puede editar.
+
+**El hallazgo de costo, que es el aporte real.** La primera corrida estructurada gastó **417 042 tokens de entrada** contra 58 174 (carry) / 63 325 (gestado) / 210 175 (sin memoria) de los brazos con editor de texto: **6,6× más**. El desglose lo explicó: el costo **por turno** era el mismo (9,7k–12,6k) y lo que cambiaba era la **cantidad de turnos** — 33 contra 6 — porque el modelo hacía **una edición por turno** (`tools/turn = 0.94`) mientras el editor de texto batchea 1,83. Con `graph_edit(edits=[...])` aceptando N ediciones en una llamada y las reglas del step exigiéndolo, la misma tarea pasó a **113 217 tokens** (3,7× menos), 12 llamadas de modelo y 8 tool calls en vez de 31. **En un agente el costo no es la herramienta: es el número de turnos, porque cada turno reenvía el contexto.**
+
+**El límite que el lote destapó.** La corrida batcheada falló con `TS2448: 'updateImageOpacity' used before its declaration`: el modelo insertó la declaración al final del cuerpo y la referencia en el `return {...}` de más arriba. El chequeo de sintaxis **no puede** ver eso — es un error semántico, no de sintaxis — y por eso `insert_member` ganó `position`, para que la colocación sea *decible* en vez de adivinada. Es la frontera del gate: valida que el archivo parsee con la gramática correcta, no que el programa tenga sentido; eso lo dice `tsc`.
+
+Verificación del motor: `ts_edit_check` 14/14 (incluye los dos rechazos que dejan el archivo intacto, entidad inexistente → candidatos, anidada por nombre punteado, `position='start'`, `dry_run`), `ts_patch_check` 6/6, y telemetría de lote visible para el audit (`operation: batch`, cantidad, operaciones, entidades).
+
 ## Riesgos / caveats
 
 - **`invokes` es heurístico por nombre** (sin tipos) — más ruidoso en TS. Desde v6 está acotado por binding de import (default) con fallback global gateado; el salto a tipos reales sigue siendo el híbrido con `tsserver`/`solidlsp`.
