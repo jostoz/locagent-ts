@@ -319,7 +319,8 @@ def _file_outline(g, nid: str, n_lines: int, raw_skeleton: str) -> str:
         sig = next((ln.strip() for ln in (cd.get('skeleton') or '').splitlines()
                     if ln.strip() and not ln.strip().startswith(('//', '/*', '*'))), nm)
         tag = ' [component]' if cd.get('is_component') else \
-              ' [context]' if cd.get('type') == NODE_TYPE_CONTEXT else ''
+              ' [context]' if cd.get('type') == NODE_TYPE_CONTEXT else \
+              f" [{cd['ts_kind']}]" if cd.get('ts_kind') else ''
         rows.append((cd.get('start_line', 0),
                      f'  L{cd.get("start_line", "?")}-{cd.get("end_line", "?")}  '
                      f'{sig[:140]}{tag}'))
@@ -465,7 +466,8 @@ def graph_search(query: str, max_results: int = 10, scope: str = 'all') -> str:
             head = next((ln.strip() for ln in sk if ln.strip()
                          and not ln.strip().startswith(('//', '/*', '*'))), '')
         tag = ', component' if nd.get('is_component') else \
-              ', context' if nd.get('type') == NODE_TYPE_CONTEXT else ''
+              ', context' if nd.get('type') == NODE_TYPE_CONTEXT else \
+              f", {nd['ts_kind']}" if nd.get('ts_kind') else ''
         out.append(f'- {nid}  ({nd.get("type")}{tag}, {_loc(nid, nd)})'
                    + (f'\n    {head[:160]}' if head else ''))
     out.append('\nNext: graph_get("<id>") for code, graph_traverse("<id>") for neighbours.')
@@ -634,8 +636,9 @@ def graph_edit(entity_id: str = '', operation: str = 'replace_in_node',
         entity_id: graph id of the entity to change, as printed by graph_search
             (e.g. "src/board/toolbars.tsx:ImageFormatToolbar"). `id` is an alias.
         operation: one of "replace_in_node" (default; one unique substring inside
-            the entity), "replace_node" (the whole entity), "insert_before",
-            "insert_after", "delete_node".
+            the entity), "insert_member" (a new member inside the entity's body --
+            an interface field, a class method, a statement), "replace_node" (the
+            whole entity), "insert_before", "insert_after", "delete_node".
         replacement: the new code, for replace_node / insert_*.
         old_str, new_str: the substring and its replacement, for replace_in_node.
         dry_run: report what would change without writing.

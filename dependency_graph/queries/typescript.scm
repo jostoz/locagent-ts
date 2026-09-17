@@ -48,6 +48,16 @@
 
 ; `export default class Foo {}` wraps the declaration; the inner rule still fires.
 
+; ─────────────────────────  interfaces / type aliases  ────────────────────
+; Not behavioural entities, but the unit a task like "add a field to BoardImage"
+; has to address: without them, a structured editor cannot express the change and
+; free-text editing is forced back in for exactly the steps that need it most.
+(interface_declaration
+  name: (type_identifier) @name) @def.interface
+
+(type_alias_declaration
+  name: (type_identifier) @name) @def.interface
+
 ; ─────────────────────────────  heritage  ────────────────────────────
 ; class Foo extends Bar implements Baz {}
 (class_heritage

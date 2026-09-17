@@ -94,6 +94,10 @@ _DEF_KIND = {
     'def.class': NODE_TYPE_CLASS,
     'def.wrapped': NODE_TYPE_FUNCTION,
     'def.context': NODE_TYPE_CONTEXT,
+    # An interface or alias is a class-shaped node: it carries members, it can be
+    # extended, and it is the unit an edit like "add a field to BoardImage" names.
+    # `ts_kind` on the node keeps the distinction visible to the tools.
+    'def.interface': NODE_TYPE_CLASS,
 }
 
 # extremely common Array / Promise / string / DOM method names -- a bare-name
@@ -272,6 +276,20 @@ def _effective_body(node):
     if node.type == 'call_expression':
         return _find_inner_function(node) or node
     return node
+
+
+_MEMBER_BODY_TYPES = ('object_type', 'class_body', 'interface_body', 'enum_body')
+
+
+def _member_body_lines(node) -> Tuple[Optional[int], Optional[int]]:
+    """Lines spanned by the entity's member body (the braces a new member goes
+    inside), or ``(None, None)`` when the entity has none -- an arrow function, a
+    union alias, a plain value. ``ts_edit.insert_member`` refuses in that case
+    rather than guessing where a member would belong."""
+    body = node.child_by_field_name('body')
+    if body is None or body.type not in _MEMBER_BODY_TYPES:
+        return None, None
+    return body.start_point[0] + 1, body.end_point[0] + 1
 
 
 def _subtree_has_jsx(inner) -> bool:
@@ -474,9 +492,17 @@ def analyze_ts_file(abs_path: str, grammar: str) -> Tuple[List[dict], List[dict]
             and _is_pascal_case(name)
             and _subtree_has_jsx(node)
         )
+        ts_kind = None
+        if kind == NODE_TYPE_CLASS and node.type == 'interface_declaration':
+            ts_kind = 'interface'
+        elif kind == NODE_TYPE_CLASS and node.type == 'type_alias_declaration':
+            ts_kind = 'type'
+        member_start, member_end = _member_body_lines(node)
         ent = {
             'name': dotted,
             'type': kind,
+            'ts_kind': ts_kind,
+            'member_body': (member_start, member_end) if member_start else None,
             'code': _node_text(outer, data),
             'start_line': outer.start_point[0] + 1,
             'end_line': outer.end_point[0] + 1,
@@ -692,6 +718,8 @@ def _graph_add_file(graph, rel_dir, rel_file, content, grammar, entities, import
             is_component=ent['is_component'],
             is_exported=ent['is_exported'],
             is_context=ent['is_context'],
+            ts_kind=ent['ts_kind'],
+            member_body=ent['member_body'],
             _calls=ent['calls'], _renders=ent['renders'], _heritage=ent['heritage'],
             _contexts=ent['contexts'], _provides=ent['provides'],
         )

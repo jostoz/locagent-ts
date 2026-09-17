@@ -16,6 +16,8 @@ is what makes it work on components at all.
 Operations, and when each is the right one:
 
     replace_in_node   one unique substring inside the entity -- small changes
+    insert_member     a new member inside the entity's body (a field of an
+                      interface, a method of a class, a statement in a function)
     replace_node      the whole entity: new function, rewritten body
     insert_before     a new entity above the target, at the target's indent
     insert_after      a new entity below the target
@@ -40,8 +42,8 @@ from dependency_graph.ts_build_graph import (
     load_source,
 )
 
-OPERATIONS = ('replace_node', 'insert_before', 'insert_after', 'delete_node',
-              'replace_in_node')
+OPERATIONS = ('replace_in_node', 'insert_member', 'replace_node', 'insert_before',
+              'insert_after', 'delete_node')
 
 _MAX_LISTED_CANDIDATES = 25
 
@@ -98,8 +100,9 @@ def list_entities(abs_path: str, grammar: str) -> List[dict]:
     """The file's entities, as ``{name, type, start_line, end_line}`` -- used to
     teach a caller that named something that is not there."""
     entities, _imports = analyze_ts_file(abs_path, grammar)
-    return [{'name': e['name'], 'type': e['type'],
-             'start_line': e['start_line'], 'end_line': e['end_line']}
+    return [{'name': e['name'], 'type': e['type'], 'ts_kind': e.get('ts_kind'),
+             'start_line': e['start_line'], 'end_line': e['end_line'],
+             'member_body': e.get('member_body')}
             for e in entities]
 
 
@@ -128,6 +131,26 @@ def _apply(lines: List[str], entity: dict, operation: str, replacement: str,
             raise ValueError('old_str y new_str son iguales')
         block = block.replace(old_str, new_str, 1)
         return lines[:start - 1] + block.split('\n') + lines[end:], 'sustitución única en el nodo'
+
+    if operation == 'insert_member':
+        if not replacement or not replacement.strip():
+            raise ValueError('replacement vacío')
+        body = entity.get('member_body')
+        if not body:
+            raise ValueError(f'{entity["name"]} no tiene cuerpo de miembros donde insertar '
+                             '(¿es una función de expresión o un alias de unión?)')
+        body_start, body_end = body
+        members = [l for l in lines[body_start:body_end - 1] if l.strip()]
+        if members:
+            member_indent = _entity_indent(lines, body_start + 1, body_end) or (indent + '    ')
+        else:
+            member_indent = indent + '    '
+        new_members = _reindent(replacement, member_indent)
+        if not new_members:
+            raise ValueError('replacement no contiene código')
+        # justo antes de la llave de cierre del cuerpo
+        return (lines[:body_end - 1] + new_members + lines[body_end - 1:],
+                f'{len(new_members)} línea(s) insertadas en el cuerpo')
 
     if operation == 'replace_node':
         if not replacement or not replacement.strip():

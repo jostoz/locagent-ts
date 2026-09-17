@@ -38,7 +38,17 @@ export function useCounter(start: number) {
 }
 """
 
-_FILES = {'src/components/Button.tsx': BUTTON, 'src/hooks/useCounter.ts': HOOK}
+TYPES = """export interface BoardImage {
+  id: string
+  x: number
+  y: number
+}
+
+export type Mode = 'a' | 'b'
+"""
+
+_FILES = {'src/components/Button.tsx': BUTTON, 'src/hooks/useCounter.ts': HOOK,
+          'src/types.ts': TYPES}
 
 
 def _write(root: str) -> None:
@@ -127,9 +137,25 @@ def run(verbose: bool = False, root: Optional[str] = None) -> int:
     check('dry_run no escribe', out['status'] == 'ok' and out['dry_run']
           and _read(root, 'src/components/Button.tsx') == before)
 
+    # 9. insert_member: a field inside an interface, at the members' indent
+    _write(root)
+    out = edit_entity(root, 'src/types.ts', 'BoardImage', 'insert_member',
+                      replacement='opacity?: number\n')
+    text = _read(root, 'src/types.ts')
+    check('insert_member añade el campo con la indentación de los miembros',
+          out['status'] == 'ok' and '  opacity?: number' in text, out.get('message', ''))
+
+    # 10. an entity with no member body refuses instead of guessing
+    _write(root)
+    before = _read(root, 'src/types.ts')
+    out = edit_entity(root, 'src/types.ts', 'Mode', 'insert_member', replacement='c: 3')
+    check('sin cuerpo de miembros -> rechazado', out['status'] == 'error'
+          and 'cuerpo de miembros' in out['message'], out.get('message', '')[:90])
+    check('...y el archivo quedó intacto', _read(root, 'src/types.ts') == before)
+
     shutil.rmtree(root, ignore_errors=True)
-    total = 8
-    print(f'edit_check: {total - len(failures)}/{total} casos OK')
+    total = 12
+    print(f'edit_check: {total - failures.__len__()}/{total} casos OK')
     return 1 if failures else 0
 
 
