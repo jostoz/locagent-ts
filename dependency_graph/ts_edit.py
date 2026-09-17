@@ -18,10 +18,13 @@ Operations, and when each is the right one:
     replace_in_node   one unique substring inside the entity -- small changes
     insert_member     a new member inside the entity's body (a field of an
                       interface, a method of a class, a statement in a function).
-                      ``position='start'`` puts it at the top of the body, which is
-                      what a `const` referenced above its insertion point needs:
-                      the syntax check cannot see "used before declaration", that
-                      is tsc's job, so placement has to be sayable
+                      ``position='start'`` puts it at the top of the body. When the
+                      member declares a ``const``/``let`` whose name is already used
+                      above the insertion point (a hook's ``return {...}`` is the
+                      usual case) the member is placed at the top *and the answer
+                      says so*: a ``const`` is not hoisted, "used before
+                      declaration" is a semantic error the syntax gate cannot see,
+                      and an agent with no compiler access cannot discover it
     replace_node      the whole entity: new function, rewritten body
     insert_before     a new entity above the target, at the target's indent
     insert_after      a new entity below the target
@@ -37,6 +40,7 @@ lists and the wiring report belong to the caller (``locagent_mcp.graph_edit``).
 from __future__ import annotations
 
 import os
+import re
 from typing import Dict, List, Optional, Tuple
 
 from dependency_graph.ts_build_graph import (
@@ -153,9 +157,25 @@ def _apply(lines: List[str], entity: dict, operation: str, replacement: str,
         new_members = _reindent(replacement, member_indent)
         if not new_members:
             raise ValueError('replacement no contiene código')
+        # Un `const`/`let` no se hoistea: si el nombre ya se usa más arriba en el
+        # archivo (el `return {...}` de un hook es el caso típico), insertarlo al
+        # final produce TS2448 -- un error semántico que el chequeo de sintaxis no
+        # puede ver y que el agente, sin compilador, no puede descubrir. La
+        # colocación se decide acá y se informa, en vez de depender de que el
+        # llamante lo recuerde.
+        hoisted_note = ''
+        if not position.startswith('start'):
+            declared = re.search(r'\b(?:const|let)\s+([A-Za-z_$][\w$]*)', replacement)
+            if declared:
+                name = declared.group(1)
+                above = '\n'.join(lines[:body_end - 1])
+                if re.search(r'\b' + re.escape(name) + r'\b', above):
+                    position = 'start'
+                    hoisted_note = (f' (colocada al inicio: `{name}` se usa más arriba y '
+                                    '`const` no se hoistea)')
         if position == 'start':      # al comienzo del cuerpo, tras la llave de apertura
             return (lines[:body_start] + new_members + lines[body_start:],
-                    f'{len(new_members)} línea(s) insertadas al inicio del cuerpo')
+                    f'{len(new_members)} línea(s) insertadas al inicio del cuerpo{hoisted_note}')
         # justo antes de la llave de cierre del cuerpo (por defecto)
         return (lines[:body_end - 1] + new_members + lines[body_end - 1:],
                 f'{len(new_members)} línea(s) insertadas en el cuerpo')

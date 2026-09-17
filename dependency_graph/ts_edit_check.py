@@ -164,8 +164,24 @@ def run(verbose: bool = False, root: Optional[str] = None) -> int:
           out['status'] == 'ok' and 'doubled' in first_member, first_member.strip()[:60])
     check('...y con la indentación de los miembros', first_member.startswith('  const'), repr(first_member[:22]))
 
+    # 12. un `const` que ya se usa arriba no puede quedar abajo: TS2448
+    _write(root)
+    with open(os.path.join(root, 'src/hooks/useCounter.ts'), 'w', encoding='utf-8', newline='\n') as fh:
+        fh.write("""export function useCounter(start: number) {
+  const api = { reset };
+  return api;
+}
+""")
+    out = edit_entity(root, 'src/hooks/useCounter.ts', 'useCounter', 'insert_member',
+                      replacement='const reset = () => 1;\n')
+    text = _read(root, 'src/hooks/useCounter.ts')
+    decl = next(i for i, l in enumerate(text.splitlines()) if 'export function useCounter' in l)
+    check('`const` usado arriba se coloca al inicio (no debajo del uso)',
+          out['status'] == 'ok' and 'reset' in text.splitlines()[decl + 1]
+          and 'no se hoistea' in out.get('detail', ''), out.get('detail', '')[:80])
+
     shutil.rmtree(root, ignore_errors=True)
-    total = 14
+    total = 15
     print(f'edit_check: {total - failures.__len__()}/{total} casos OK')
     return 1 if failures else 0
 
