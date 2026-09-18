@@ -1,0 +1,64 @@
+{
+  "task_id": "e5",
+  "planner_model": "deepseek-reasoner",
+  "task": "In src/board/toolbars.tsx, add an optional `title?: string` prop to LayerButtons (destructured in its parameter object, defaulting to 'Layer'), and pass `title=\"Ordenar\"` at the LayerButtons call site inside ShapeFormatToolbar.",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Locate the LayerButtons component signature and its call site inside ShapeFormatToolbar.",
+      "target_file": "src/board/toolbars.tsx",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:LayerButtons",
+        "graph_get:ShapeFormatToolbar"
+      ],
+      "edit_spec": "",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 2,
+      "goal": "Add the optional `title` prop, destructured with default 'Layer', to the LayerButtons parameter object.",
+      "target_file": "src/board/toolbars.tsx",
+      "operation": "edit",
+      "tool": "editor",
+      "locate_with": [
+        "graph_get:LayerButtons"
+      ],
+      "edit_spec": "Inside the object destructuring pattern of the LayerButtons function parameter (the `{ ... }`: arrow-function parameter list for `const LayerButtons = ({ ... }) =>` or `function LayerButtons({ ... })`), add a new destructured property `title = 'Layer',` alongside the existing destructured props. If no type annotation exists on the parameter, also ensure the prop is declared and optional as `title?: string` in the associated props type/interface for LayerButtons. Do not change any other prop or the component body except to render the passed `title` where the hardcoded label currently is, ONLY if a hardcoded 'Layer' literal is used there.",
+      "max_edit_lines": 10,
+      "acceptance_check": {
+        "type": "grep",
+        "cmd": "Select-String -Path src/board/toolbars.tsx -Pattern \"title\"",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 3,
+      "goal": "Pass title=\"Ordenar\" at the LayerButtons call site inside ShapeFormatToolbar.",
+      "target_file": "src/board/toolbars.tsx",
+      "operation": "edit",
+      "tool": "editor",
+      "locate_with": [
+        "graph_get:ShapeFormatToolbar",
+        "graph_get:LayerButtons"
+      ],
+      "edit_spec": "Find the JSX usage `<LayerButtons` rendered inside the ShapeFormatToolbar component and insert the attribute `title=\"Ordenar\"` into that element's attribute list (e.g. `<LayerButtons title=\"Ordenar\" ... />`). Add only this attribute; leave all existing props untouched.",
+      "max_edit_lines": 10,
+      "acceptance_check": {
+        "type": "grep",
+        "cmd": "Select-String -Path src/board/toolbars.tsx -Pattern 'title=\\\"Ordenar\\\"'",
+        "expect": "exit_zero"
+      }
+    }
+  ],
+  "final_acceptance": {
+    "type": "tsc",
+    "cmd": "npx tsc -p tsconfig.app.json --noEmit",
+    "expect": "exit_zero"
+  }
+}

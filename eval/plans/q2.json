@@ -1,0 +1,46 @@
+{
+  "type": "json_object",
+  "task_id": "q2",
+  "planner_model": "deepseek-reasoner",
+  "task": "Where is the core z-order reorder function defined? Give the file and the starting line.",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Search the repo for entities named like a z-order reorder function to identify the defining file.",
+      "target_file": "src/board/zorder.ts",
+      "operation": "inspect",
+      "tool": "graph_search",
+      "locate_with": [
+        "graph_search:reorder",
+        "graph_search:zorder"
+      ],
+      "edit_spec": "",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 2,
+      "goal": "Read src/board/zorder.ts and name the reorder function together with its starting line.",
+      "target_file": "src/board/zorder.ts",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:src/board/zorder.ts"
+      ],
+      "edit_spec": "",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    }
+  ],
+  "final_acceptance": {
+    "type": "none",
+    "cmd": "",
+    "expect": "exit_zero"
+  }
+}

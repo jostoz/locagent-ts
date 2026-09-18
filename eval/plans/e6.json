@@ -1,0 +1,67 @@
+{
+  "task_id": "e6",
+  "planner_model": "deepseek-reasoner",
+  "task": "Add `export const isTextBoxNote = (note: { color?: string }) => note.color === undefined` to src/board/useStickyNotes.ts (just after the StickyNote interface). Then in src/board/Board.tsx, import isTextBoxNote from './useStickyNotes' and use it to replace the `note.color === undefined` check inside NoteShape's handleTransform (the fontSize ternary).",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Insert the exported isTextBoxNote helper directly after the StickyNote interface in src/board/useStickyNotes.ts.",
+      "target_file": "src/board/useStickyNotes.ts",
+      "operation": "edit",
+      "tool": "editor",
+      "locate_with": [
+        "graph_get:src/board/useStickyNotes.ts",
+        "graph_search:StickyNote"
+      ],
+      "edit_spec": "Use graph_search 'StickyNote' to find the `interface StickyNote` declaration in this file. Insert exactly one new line immediately after that interface's closing brace: export const isTextBoxNote = (note: { color?: string }) => note.color === undefined   (no other lines added, removed, or reordered; place it before any code that followed the interface).",
+      "max_edit_lines": 3,
+      "acceptance_check": {
+        "type": "grep",
+        "cmd": "grep -q \"export const isTextBoxNote = (note: { color?: string }) => note.color === undefined\" src/board/useStickyNotes.ts",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 2,
+      "goal": "Import isTextBoxNote from './useStickyNotes' at the top of src/board/Board.tsx.",
+      "target_file": "src/board/Board.tsx",
+      "operation": "edit",
+      "tool": "editor",
+      "locate_with": [
+        "graph_get:src/board/Board.tsx",
+        "graph_search:useStickyNotes"
+      ],
+      "edit_spec": "Look at the top-of-file import block. If a line already imports from './useStickyNotes' (single-line or multi-line named import), add `isTextBoxNote` to that named import list, e.g. import { useStickyNotes, isTextBoxNote } from './useStickyNotes';. If no such import line exists, insert the single new line `import { isTextBoxNote } from './useStickyNotes';` immediately after the last top-level import statement. Do not change any other line of the file.",
+      "max_edit_lines": 4,
+      "acceptance_check": {
+        "type": "grep",
+        "cmd": "grep -q \"isTextBoxNote\" src/board/Board.tsx",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 3,
+      "goal": "Replace the fontSize ternary condition `note.color === undefined` in NoteShape's handleTransform with a call to isTextBoxNote(note).",
+      "target_file": "src/board/Board.tsx",
+      "operation": "edit",
+      "tool": "editor",
+      "locate_with": [
+        "graph_get:src/board/Board.tsx",
+        "graph_search:NoteShape",
+        "graph_search:handleTransform"
+      ],
+      "edit_spec": "Locate the `NoteShape` component and inside its `handleTransform` callback find the fontSize ternary whose condition is the text `note.color === undefined`. Replace ONLY that condition text with `isTextBoxNote(note)`, so the line reads like: fontSize: isTextBoxNote(note) ? ... : ..., leaving the two ternary result branches byte-for-byte unchanged and touching no other line in the file.",
+      "max_edit_lines": 4,
+      "acceptance_check": {
+        "type": "grep",
+        "cmd": "grep -q \"isTextBoxNote(note)\" src/board/Board.tsx",
+        "expect": "exit_zero"
+      }
+    }
+  ],
+  "final_acceptance": {
+    "type": "tsc",
+    "cmd": "npx tsc -p tsconfig.app.json --noEmit",
+    "expect": "exit_zero"
+  }
+}

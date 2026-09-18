@@ -1,0 +1,27 @@
+{
+  "task_id": "q10",
+  "planner_model": "qwen3.8-27b",
+  "task": "Where is the pure z-order array algorithm and its helper arraysEqual defined?",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Identify the file that defines the pure z-order array algorithm and arraysEqual.",
+      "target_file": "src/board/zorder.ts",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:src/board/zorder.ts"
+      ],
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    }
+  ],
+  "final_acceptance": {
+    "type": "none",
+    "cmd": "",
+    "expect": "exit_zero"
+  }
+}

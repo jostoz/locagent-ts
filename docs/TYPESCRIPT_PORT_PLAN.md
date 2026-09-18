@@ -176,9 +176,12 @@ localización de código para un agente con ventana de contexto chica (qwen-2.5-
 Cline) sobre un codebase TS/React con archivos gigantes, frente a: sin retrieval, la
 búsqueda nativa del agente, y retrieval por LSP (Serena)?
 
-**Condiciones:** (a) qwen-Cline sin retrieval · (b) + `search_codebase` nativo · (c) +
-LocAgent-TS MCP · (d) + Serena.
+**Condiciones:** (a) qwen-Cline sin retrieval · (b) + `search_codebase`/ripgrep nativo ·
+(c) + LocAgent-TS MCP · (d) + Serena · (e) + tgrep indexado · (f) router híbrido
+tgrep + LocAgent-TS.
 **Ablations de (c):** sin edge `renders`; sin `invokes`; solo BM25 vs BM25 + fuzzy + `graph_traverse`.
+**Ablations de (f):** tgrep primero para consulta literal vs grafo primero para intención;
+índice caliente vs `--no-index`; presupuesto máximo de llamadas por etapa.
 
 **Métricas:** acc@k y recall@k a nivel archivo y a nivel función/entidad, k ∈ {1, 3, 5, 10}.
 Nota: reimplementar acc@k / recall@k **sin `torch`** — las de `evaluation/eval_metric.py`
@@ -197,7 +200,8 @@ autor → mitigar con un criterio de relevancia escrito y, de ser posible, doble
 
 **Artefactos cuando se retome:** `docs/PAPER.md` (o LaTeX), `eval/` (harness + `.jsonl` +
 métrica torch-free + runner), tablas/figuras. Related work a cubrir: LocAgent (ACL 2025),
-Serena / agentes sobre LSP, Aider repo-map, herramientas de grafo de código sobre tree-sitter.
+Serena / agentes sobre LSP, Aider repo-map, herramientas de grafo de código sobre tree-sitter,
+y búsqueda léxica indexada por trigramas (microsoft/tgrep y Zoekt).
 
 **Esfuerzo estimado:** etiquetado + harness ~2-3 días; corridas de las 4 condiciones +
 ablations ~2 días; redacción ~1 semana.
@@ -553,6 +557,12 @@ sucio con residuos de la sesión fallida del post-mortem).
 
 ## Stage 2 — decidido: PAIOS como protocolo, no LangGraph (2026-09-11)
 
+**Paso previo añadido (2026-09-15):** ejecutar la evaluación tgrep/LocAgent descrita en
+`eval/TGREP_HYBRID_PLAN.md`. Stage 2 puede implementar la interfaz del router, pero tgrep
+no se convierte en dependencia obligatoria hasta superar el gate. Si lo supera, el rol
+explorador usa tgrep para texto/regex y LocAgent para intención y relaciones; cada packet
+registra herramienta, fallback, latencia, resultados y frescura del índice.
+
 **Decisión tomada y documentada en `paios-bootstrap/decisions/0018-integracion-locagent-ts-stage2.md`
 — no se re-deriva el razonamiento acá, solo el resumen ejecutable.**
 
@@ -579,6 +589,10 @@ trackeado (`AGENTS.md`, `contracts/`, `scripts/`, `state/`, 16 tareas
   PAIOS — granularidad: ¿un packet por tarea del corpus, o uno por paso del
   plan (`TASK-e6-step1`, `TASK-e6-step2`, ...)? Confirmar contra la semántica
   real de `claim.sh`/`verify.sh`, no asumir.
+  **Resuelto para el caso de opacidad (2026-09-17):** un packet por tarea con steps
+  internos — un packet por step permitiría aceptar piezas sin verificar el wiring final
+  (ver `forge-platform/triad-integration/evals/opacity/proposal.md`). La pregunta general
+  de Stage 2 sigue abierta.
 - Si `claim.sh`/`verify.sh` necesitan adaptación para un rol builder que
   corre aislado (`eval/isolated_env.py`, `run_commands` deshabilitado a nivel
   de tool-schema, MCP solo-`locagent`).
@@ -624,22 +638,153 @@ trackeado (`AGENTS.md`, `contracts/`, `scripts/`, `state/`, 16 tareas
   local en la matriz de Stage 1 (hoy: DeepSeek API) o como planificador local
   de respaldo sin depender de una API paga.
 
+## v6 (2026-09-16) — precisión de aristas, contexto React e invalidación incremental
+
+**Precisión.** `fuzzy_search` pasa a **default `False`**: `invokes`/`renders`/`inherits` se resuelven solo por binding de import (nivel 1) o por los archivos que el caller importa (nivel 2). El fallback global (nivel 3) queda opt-in (`--fuzzy`, `LOCAGENT_FUZZY=1`) y **con gate**: solo entidades exportadas (`is_exported`) y solo cuando el nombre no lo comparten más de `_MAX_UNBOUND_FANOUT` (6) entidades. Medido en DeskcommCRM (3 062 archivos): 294 753 aristas `invokes` con el fallback sin gate → 11 069 con gate → 10 365 sin fallback, para 9 297 funciones. Muestreo de las aristas que se pierden al apagar el fallback: producción → *test doubles* (`FakeQB.update`, `chain.get`, `y`), 100% ruido en las 12 muestreadas. En miro-clone: `invokes` 771 → 720, `renders` 142 → 142 (intactas), 72 con sitios de props.
+
+**Bug de resolución de alias (encontrado midiendo).** `_strip_jsonc` usaba regex y comía el `/*` dentro del glob `"**/*.ts"` del `include` — es decir, **cualquier tsconfig de Next.js** — truncando el JSON y perdiendo `compilerOptions.paths` en silencio: DeskcommCRM resolvía **0** alias y sus aristas `imports` eran 2 436 (solo relativos). Ahora es un escáner string-aware, soporta la cadena `extends` (padre primero, hijo gana) y resuelve `baseUrl` contra el directorio del tsconfig que lo declara. Tras el fix: `imports` 12 179 y `renders` 2 259 con el fallback apagado (antes: 5 010 `invokes`/454 `renders`), o sea el fix **recupera** recall en lugar de solo limpiar ruido.
+
+**Contexto React (Nivel 4, mitad que faltaba).** Nodos `context` (`const Ctx = createContext(...)`, también `React.createContext`) y dos aristas nuevas: `consumes_context` (componente/hook → contexto, desde `useContext(Ctx)`, con `call_lines`) y `provides_context` (componente → contexto, desde `<Ctx.Provider value={...}>`, con `jsx_lines` + el `value` bindeado colapsado). Capturas nuevas en `queries/typescript.scm` con predicados `#eq?` cubriendo las formas `useContext(...)`/`React.useContext(...)`. De paso: `_jsx_tag_parts` — la gramática tsx 2023 parsea `member_expression` de un tag JSX con hijos posicionales y **sin** fields, así que `<Foo.Bar/>` nunca generaba arista; ahora se resuelve por posición. Verificado en un repo que sí usa context (`v0-airbnb-experiences/niche-pivot-handoff`): 6 nodos, 6 `consumes_context`, 6 `provides_context`, con `value=contextValue` capturado. **miro-clone no usa `createContext`/`useContext` en absoluto** — el corpus de la tesis no puede medir esta feature; el smoke la verifica aparte.
+
+**Invalidación incremental.** `scan_sources()` (DFS con `os.scandir`, `mtime_ns` + tamaño — nanosegundos porque un agente edita y pregunta dentro del mismo segundo) y `patch_ts_graph(graph, repo, changed)`. Clausura del refresh: `changed` ∪ todo archivo con una arista **hacia** los nodos cambiados, excluyendo nodos directorio (un directorio en el conjunto arrastraba a todos sus hermanos — bug real, ver abajo). Solo se re-parsean los archivos cambiados: los atributos de derivación (`_calls`/`_renders`/`_heritage`/`_contexts`/`_provides`) y la lista de imports por archivo se retienen en el grafo, así que recomputar un importador no cuesta parseo. El MCP refresca en cada tool call y marca el BM25 como sucio (se reconstruye en el próximo `graph_search`, no en el camino de edición).
+
+| caso | patch | rebuild | speedup |
+|---|---:|---:|---:|
+| miro-clone (112 archivos), edición hoja | **33 ms** | 0.86 s | 26× |
+| miro-clone, edición de hub (`lib/utils.ts`) | **174 ms** | 0.54 s | 3× |
+| DeskcommCRM (3 062), edición hoja | **73 ms** | 11.0 s | 150× |
+| DeskcommCRM, edición de hub (`ui/button.tsx`) | **306 ms** | 10.8 s | 35× |
+
+Escaneo de frescura: 4-5 ms (miro) / 93-106 ms (DeskcommCRM) por tool call. Smoke por stdio real: edición a mitad de sesión visible en **27 ms**, entidad nueva resoluble y arista `invokes` del archivo nuevo presente **sin reiniciar** el server.
+
+**Regresión permanente:** `python -m dependency_graph.ts_patch_check` — 6 casos de edición (añadir export+call, cambio de props, borrado, archivo nuevo, rename de contexto, batch multi-archivo) y cada uno compara el grafo parcheado contra un rebuild completo, nodo por nodo y arista anotada por arista anotada. Verificado que **falla** (3/6) si se quita la exclusión de directorios de la clausura.
+
+**Caveats nuevos:** el coste del patch es proporcional al *fan-in inverso* del archivo editado (hub = cientos de ms, no ms); el BM25 se reconstruye entero en el próximo `graph_search` (0.5 s miro / ~4 s DeskcommCRM) — diferido a propósito; el modo `--fuzzy` no es parcheable (el name-match global rompe la clausura → rebuild); `patch_ts_graph` exige `fuzzy_search=False`.
+
+## v7 (2026-09-16) — capa de edición estructurada (el sustituto de un espacio de acción tipo CodeAct)
+
+**Qué es.** `graph_edit` en el MCP + `dependency_graph/ts_edit.py`: se edita **una entidad direccionada por su id de grafo** (`path:Entidad` o `path:Clase.metodo`), no un span de texto. Operaciones: `replace_in_node` (una subcadena única dentro de la entidad — la que se prefiere), `replace_node`, `insert_before`, `insert_after`, `delete_node`, y `dry_run`.
+
+**De dónde viene el contrato.** De CodeStruct (ACL 2026, Amazon), cuyo artefacto se inspeccionó en `forge-platform/triad-integration/research/codestruct-vs-locagent-ts.md`. Se adoptó **el contrato, no el código** (aquel es CC-BY-NC-4.0): unidad = entidad AST con nombre; errores que enseñan; texto para cambios chicos, AST para entidades completas; operaciones acotadas; sin autoridad. Las diferencias son las que hacen falta en TS/React, y están medidas sobre el artefacto original: CodeStruct manda `.tsx` a la gramática `typescript` (294 nodos `ERROR` en `toolbars.tsx`, 1 selector de 10), su tabla de tipos no conoce `arrow_function` ni `variable_declarator` (`avatar.tsx` → 0 selectores), y su validación sintáctica es `python_ast.parse` sólo para `.py`.
+
+**Qué agrega sobre eso.** Gramática por extensión (`tsx` para `.tsx`), y **la escritura se rechaza** si el re-parse introduce nodos `ERROR`/`missing` que antes no estaban: nada se escribe a ciegas. Direccionamiento por identidad del grafo con nombres anidados (`useBoardImages.updateImageCrop`), que en un codebase de hooks es la mitad de las entidades.
+
+**Coherencia de cableado.** Tras una edición exitosa el grafo se refresca (parche incremental, ver v6) y el reporte lista quién referencia lo editado — `invokes`, `renders`, `consumes_context`, `provides_context`, con su `@L<línea>` — es decir, el conjunto de sitios que la edición acaba de dejar desalineados. Si la entidad desapareció (borrado o rename), lista las referencias **previas**, que son los huérfanos. Eso es lo que CodeStruct no puede dar y es exactamente lo que rompió el wiring dos veces en el estrés de opacidad.
+
+**Autoridad.** El servidor es de sólo lectura salvo `LOCAGENT_ALLOW_EDITS=1`. Evidencia ≠ autoridad, como fija `contracts/triad.md`; un agente que descubre las tools no puede escribir en un checkout vivo por accidente.
+
+**Verificación.** `python -m dependency_graph.ts_edit_check` → 8/8: escribe el cambio, toca una sola línea, rechaza `old_str` no único (archivo intacto), rechaza sintaxis rota (archivo intacto), entidad inexistente devuelve candidatos, entidad anidada por nombre punteado, `insert_after` visible para el índice, `delete_node` reporta `entity_gone`, `dry_run` no escribe. Smoke por stdio real sobre una copia de miro-clone (12/12): sin el flag no edita; `replace_in_node` sobre `cn` se aplica, el archivo cambia y el grafo lo refleja sin reiniciar el server; el reporte lista los `invokes` que referencian `cn`; una edición que rompe sintaxis se rechaza y el archivo queda intacto; `insert_after` aparece en `graph_search`.
+
+**Límite.** No propaga renombres ni hace transacciones multi-archivo: el reporte de referencias es para que el agente recablee, no lo hace por él.
+
+## v8 (2026-09-16) — la edición estructurada, medida dentro de un agente
+
+**Qué se integró.** Un agente real (Cline Core, modelo local) editando **sólo** por AST: `graph_edit` es su única herramienta de escritura, con el editor de texto, la lectura, la búsqueda y el shell denegados. Para que eso fuera posible hubo que cerrar tres huecos del motor:
+
+- **Interfaces y alias como entidades** (`ts_kind: interface|type`): sin ellas, "agregá `opacity` a `interface BoardImage`" era inexpresable como edición de entidad. Medido: 140 en miro-clone.
+- **`insert_member`**, que escribe *dentro* del cuerpo de la entidad (campo de interfaz, método, sentencia), con la indentación de los miembros, y con **`position="start"`** además del final por defecto.
+- **`describe_entities(ids)`**, función pública y no tool: devuelve la tarjeta de dirección de cada id para que un planner pueda entregarle al agente exactamente lo que puede editar.
+
+**El hallazgo de costo, que es el aporte real.** La primera corrida estructurada gastó **417 042 tokens de entrada** contra 58 174 (carry) / 63 325 (gestado) / 210 175 (sin memoria) de los brazos con editor de texto: **6,6× más**. El desglose lo explicó: el costo **por turno** era el mismo (9,7k–12,6k) y lo que cambiaba era la **cantidad de turnos** — 33 contra 6 — porque el modelo hacía **una edición por turno** (`tools/turn = 0.94`) mientras el editor de texto batchea 1,83. Con `graph_edit(edits=[...])` aceptando N ediciones en una llamada y las reglas del step exigiéndolo, la misma tarea pasó a **113 217 tokens** (3,7× menos), 12 llamadas de modelo y 8 tool calls en vez de 31. **En un agente el costo no es la herramienta: es el número de turnos, porque cada turno reenvía el contexto.**
+
+**El límite que el lote destapó.** La corrida batcheada falló con `TS2448: 'updateImageOpacity' used before its declaration`: el modelo insertó la declaración al final del cuerpo y la referencia en el `return {...}` de más arriba. El chequeo de sintaxis **no puede** ver eso — es un error semántico, no de sintaxis — y por eso `insert_member` ganó `position`, para que la colocación sea *decible* en vez de adivinada. Es la frontera del gate: valida que el archivo parsee con la gramática correcta, no que el programa tenga sentido; eso lo dice `tsc`.
+
+Verificación del motor: `ts_edit_check` 14/14 (incluye los dos rechazos que dejan el archivo intacto, entidad inexistente → candidatos, anidada por nombre punteado, `position='start'`, `dry_run`), `ts_patch_check` 6/6, y telemetría de lote visible para el audit (`operation: batch`, cantidad, operaciones, entidades).
+
+## v9 (2026-09-17) — rechazo de redeclaración: el gate que el brazo de texto no puede tener
+
+**De dónde sale.** De una medición, no de un diseño. En la matriz de mecanismo de la
+evaluación de opacidad (`opacity-mechanism-004`, 6 unidades) cinco unidades rojas dejaron
+**dos** firmas, y cuatro de ellas la *misma* firma en el *mismo* archivo bajo **los dos**
+mecanismos de edición:
+
+```
+TS2451: Cannot redeclare block-scoped variable 'updateImageOpacity'.              x2  src/board/useBoardImages.ts
+TS1117: An object literal cannot have multiple properties with the same name.     x1  src/board/useBoardImages.ts
+```
+
+Los checkouts rojos lo confirman textualmente (declaración en las líneas 223 y 264,
+propiedad devuelta en 281 y 286) y el verde no tiene ninguna. La causa: el step 3 vuelve a
+insertar lo que el step 1 ya había escrito, y el gate de sintaxis **no puede verlo** — el
+archivo parsea perfecto y `tsc` falla después, con la unidad ya gastada.
+
+**Qué hace.** Antes de escribir, `edit_entity` escanea los **ámbitos** del archivo antes y
+después del cambio y **rechaza sin escribir** cuando el cambio agrega una repetición,
+nombrando el símbolo y la línea donde ya estaba. Alcance deliberadamente estrecho: sólo lo
+que TypeScript garantiza que es error —
+
+- nombre ligado repetido dentro del mismo bloque (`TS2451`), con `program` incluido para
+  las declaraciones de módulo (los `export` se desenvuelven: la declaración es hija del
+  export, no del programa);
+- clave repetida dentro del mismo objeto literal (`TS1117`), incluida
+  `shorthand_property_identifier` — que es la forma exacta que tomó esta falla en el
+  `return {…}` del hook.
+
+Los miembros de clase e interfaz quedan **fuera** a propósito: ahí repetir el nombre es
+legal si el tipo coincide (merging, overloads) y sólo el chequeo de tipos puede decidirlo.
+Un rechazo tiene que ser *correcto*, no aproximado — un falso positivo bloquea trabajo
+legítimo.
+
+**Verificación.** `python -m dependency_graph.ts_edit_check`: **22/22** (v8 decía 14/14; los
+casos nuevos son 13-15). Contra el código previo, **18/22**: sin el guard fallan los cuatro
+asserts nuevos, incluidos los dos "el archivo quedó intacto". El caso de falso positivo
+—mismo nombre en dos bloques distintos— pasa. `ts_patch_check` 6/6. Archivos:
+`dependency_graph/ts_edit.py`, `dependency_graph/ts_edit_check.py` y el docstring de la tool
+en `locagent_mcp.py`.
+
+**Lo que NO arregla.** La otra mitad de la causa raíz es la *instrucción*: el step 3 vuelve
+a pedir el "updater" que el step 1 ya entregó. El guard impide **escribir** el duplicado, no
+**pedirlo**; eso cambia una constante del arnés y se verifica en una corrida aparte
+(rastreado en `forge-platform/triad-integration/PENDING.md`, ítem 9).
+
+**Efecto medido en un agente real (parcial, no aislado).** Corrida `opacity-guard-001`
+(3 unidades, pin `4588dce`): la firma de redeclaración está **ausente** del archivo de la
+unidad que llegó a editar ese hook, pero esa unidad murió en el tope de herramientas por step
+antes de los gates (`tsc_product: null`), la segunda fue un flake de red, y la tercera salió
+verde igual que el registro previo — así que el guard **no queda aislado** por esa corrida.
+Informe con la cadena causal completa:
+`forge-platform/triad-integration/research/falla-residual-redeclaracion.md` §8-bis.
+
+## v10 (2026-09-17) — el rechazo devuelve el texto vigente, no sólo la negativa
+
+**De dónde sale.** De `opacity-guard-001`: el step 2 editó `src/board/Board.tsx`, **cuyo
+texto no estaba en su slice**; ciego, buscó un `old_str` único **21 veces** (20-390 bytes
+por llamada), agotó el tope de 20 llamadas del step y el step siguiente —el que cerraba el
+wiring— nunca corrió (`state_board_callsite_wiring: false`). El paquete se arma **antes** de
+las ediciones del step, así que el literal copiado deja de matchear en cuanto el modelo
+edita la entidad.
+
+**Qué cambia.** `edit_entity` adjunta `entity_text` —texto vigente de la entidad, acotado a
+80 líneas— a *todo* rechazo (operación inválida, sintaxis, redeclaración, `replacement`
+faltante), y `graph_edit` lo presenta con la instrucción explícita de copiar de ahí y no del
+paquete.
+
+**Verificación.** `ts_edit_check` **25/25** (v9: 22/22). Contra el código previo, **23/25**:
+los dos casos nuevos —literal viejo devuelve el texto actual, y el rechazo por redeclaración
+también— fallan sin el cambio. `ts_patch_check` 6/6.
+
+**Lo que no arregla.** Que el modelo trabaje fuera de su slice sigue siendo posible; esto
+convierte el bucle ciego en un paso correctivo. La mitad de arnés —que el slice contenga el
+texto que el objetivo del step puede exigir, y que el paquete se regenere después de las
+ediciones del step— está rastreada en `forge-platform/triad-integration/PENDING.md`.
+
 ## Riesgos / caveats
 
-- **`invokes` es heurístico por nombre** (sin tipos) — más ruidoso en TS. v2 híbrida posible: MCP llama a `tsserver` para `references` (vía `solidlsp` de Serena), tree-sitter para estructura. Ver sección "Serena" arriba.
+- **`invokes` es heurístico por nombre** (sin tipos) — más ruidoso en TS. Desde v6 está acotado por binding de import (default) con fallback global gateado; el salto a tipos reales sigue siendo el híbrido con `tsserver`/`solidlsp`.
 - **Convenciones a nivel-valor** (`x === undefined` = modo Y) no son aristas — mitigado parcialmente por el campo comentario del BM25 (v4); ver sección arriba.
 - **Prompts de LocAgent** (`util/prompts/*.j2`) mencionan idioms Python → edición ligera.
 - **Repo research, no librería mantenida** → asperezas de setup.
-- **Barrels/re-exports y monorepos**: cola larga más allá del v1.
-- Esfuerzo: **~1 semana v1** (Fases 0-3) — **hecho y commiteado**. Lo que resta es el paper (Fase 4, diferida).
+- **Barrels/re-exports y monorepos**: cola larga más allá del v1. En v6 el resolver arregló `extends`/JSONC, pero un import que atraviesa un barrel sigue sin resolver a la entidad concreta (el edge cae a nivel archivo).
+- **React context**: soportado (v6) vía nodos `context` y aristas `consumes_context`/`provides_context`; lo que no hay es *prop drilling* ni hooks de estado (useState/useReducer) como aristas.
+- Esfuerzo: **~1 semana v1** (Fases 0-3) — **hecho y commiteado**. v6 (2026-09-16) es trabajo incremental sobre eso. Lo que resta es el paper (Fase 4, diferida).
 
 ## Archivos
 
-**Nuevos:** `dependency_graph/ts_build_graph.py`, `dependency_graph/queries/typescript.scm`, `dependency_graph/queries/tsx.scm`, `dependency_graph/ts_resolver.py`, `dependency_graph/ts_bm25.py`, `plugins/location_tools/utils/compress_file_ts.py`, `locagent_mcp.py`, `requirements-ts.txt`, `NOTICE`, `docs/omp/` (plantillas `mcp.json` + `RULES.md` + `README.md` para OMP), `eval/miro_clone_localization.jsonl` _(Fase 4, diferido)_
+**Nuevos:** `dependency_graph/ts_build_graph.py`, `dependency_graph/queries/typescript.scm`, `dependency_graph/queries/tsx.scm`, `dependency_graph/ts_resolver.py`, `dependency_graph/ts_bm25.py`, `dependency_graph/ts_patch_check.py` (chequeo de equivalencia patch↔rebuild), `plugins/location_tools/utils/compress_file_ts.py`, `locagent_mcp.py`, `requirements-ts.txt`, `NOTICE`, `docs/omp/` (plantillas `mcp.json` + `RULES.md` + `README.md` para OMP), `eval/miro_clone_localization.jsonl` _(Fase 4, diferido)_
 
 **Fuera del repo:** `C:/Users/joz/Documents/miro-clone/.omp/{mcp.json,RULES.md}` (config OMP del proyecto real, sin versionar acá)
 
-**Modificados:** `dependency_graph/build_graph.py` (`VALID_EDGE_TYPES` += `renders`; `matplotlib` a import lazy), `dependency_graph/traverse_graph.py` (`is_test_file` convención JS/TS; `global_name_dict` no-`.py`), `plugins/__init__.py` + `plugins/location_tools/__init__.py` (harness import opcional), `README.md`, `util/prompts/*.j2` (ligero), `~/.cline/data/settings/cline_mcp_settings.json`
+**Modificados:** `dependency_graph/build_graph.py` (`VALID_EDGE_TYPES` += `renders`, `consumes_context`, `provides_context`; `VALID_NODE_TYPES` += `context`; `matplotlib` a import lazy), `dependency_graph/traverse_graph.py` (`is_test_file` convención JS/TS; `global_name_dict` no-`.py`; `_edge_annot` para las aristas de contexto), `dependency_graph/ts_bm25.py` (indexa nodos `context` con hint), `dependency_graph/ts_resolver.py` (JSONC string-aware + `extends` + `baseUrl` por config), `plugins/__init__.py` + `plugins/location_tools/__init__.py` (harness import opcional), `README.md`, `util/prompts/*.j2` (ligero), `~/.cline/data/settings/cline_mcp_settings.json`
 
 **Reutilizados sin cambios:** `plugins/location_tools/retriever/fuzzy_retriever.py`, `repo_index/codeblocks/parser/*` (referencia), `evaluation/eval_metric.py`
 

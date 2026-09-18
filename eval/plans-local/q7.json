@@ -1,0 +1,62 @@
+{
+  "task_id": "q7",
+  "planner_model": "qwen3.8-27b",
+  "task": "There are two FrameIcon components. Which file has the one used inside FramesPanel, and how does it differ from the other?",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Find how FramesPanel obtains FrameIcon and record whether it is a local component or an import, including the source file if imported.",
+      "target_file": "src/board/FramesPanel.tsx",
+      "operation": "inspect",
+      "tool": "graph_search",
+      "locate_with": [
+        "graph_search:FrameIcon",
+        "graph_search:import.*FrameIcon"
+      ],
+      "edit_spec": "",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 2,
+      "goal": "Inspect the FrameIcon definition in icons.tsx and record its props, SVG viewBox/path, className/styling, and export.",
+      "target_file": "src/board/icons.tsx",
+      "operation": "inspect",
+      "tool": "graph_search",
+      "locate_with": [
+        "graph_search:FrameIcon"
+      ],
+      "edit_spec": "",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 3,
+      "goal": "Inspect any FrameIcon definition in toolbars.tsx and record how it differs from the one used by FramesPanel; if absent, note that no FrameIcon is defined here.",
+      "target_file": "src/board/toolbars.tsx",
+      "operation": "inspect",
+      "tool": "graph_search",
+      "locate_with": [
+        "graph_search:FrameIcon"
+      ],
+      "edit_spec": "",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      },
+      "_target_is_big": true
+    }
+  ],
+  "final_acceptance": {
+    "type": "none",
+    "cmd": "",
+    "expect": "exit_zero"
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "task_id": "q3",
+  "planner_model": "qwen3.8-27b",
+  "task": "Where is the z-order of shapes implemented? Point me at the core function, the per-type wrappers, and the UI buttons.",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Name the core z-order function(s) exported from src/board/zorder.ts.",
+      "target_file": "src/board/zorder.ts",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:src/board/zorder.ts"
+      ],
+      "edit_spec": "Inspect the module entities and report the primary function(s) that reorder shape z-order, such as bring-to-front, send-to-back, move-up, or move-down helpers.",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 2,
+      "goal": "Name the per-type wrapper functions/files that invoke the core z-order helpers.",
+      "target_file": "src/board/zorder.ts",
+      "operation": "inspect",
+      "tool": "graph_traverse",
+      "locate_with": [
+        "graph_get:src/board/zorder.ts"
+      ],
+      "edit_spec": "Traverse reverse invoke edges from the core z-order functions and list caller wrappers by file and function, especially in useShapes.ts, useStickyNotes.ts, or FrameShapes.tsx.",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 3,
+      "goal": "Name the UI buttons that trigger z-order changes in toolbars.",
+      "target_file": "src/board/toolbars.tsx",
+      "operation": "inspect",
+      "tool": "graph_search",
+      "locate_with": [
+        "graph_get:src/board/toolbars.tsx"
+      ],
+      "edit_spec": "Search for button labels, titles, or handlers containing z-order terms such as bring, send, front, back, forward, up, or down, and report the component/button names.",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      },
+      "_target_is_big": true
+    },
+    {
+      "n": 4,
+      "goal": "Name any additional z-order UI buttons in board overlays.",
+      "target_file": "src/board/BoardOverlays.tsx",
+      "operation": "inspect",
+      "tool": "graph_search",
+      "locate_with": [
+        "graph_get:src/board/BoardOverlays.tsx"
+      ],
+      "edit_spec": "Search for overlay action buttons or handlers that call z-order wrapper functions and report their names if present.",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    }
+  ],
+  "final_acceptance": {
+    "type": "none",
+    "cmd": "",
+    "expect": "exit_zero"
+  }
+}

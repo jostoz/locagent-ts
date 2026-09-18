@@ -1,0 +1,61 @@
+{
+  "task_id": "e3",
+  "planner_model": "qwen3.8-27b",
+  "task": "Add optional `locked?: boolean` to BoardShape in src/board/useShapes.ts. Create src/board/lockGuard.ts exporting `export function isLocked(item: { locked?: boolean }): boolean { return item.locked === true }`. Then import isLocked in useShapes.ts and use it inside reorderShapes so that ids belonging to a locked shape are dropped from the set passed to reorder().",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Create lockGuard module with isLocked helper.",
+      "target_file": "src/board/lockGuard.ts",
+      "operation": "create",
+      "tool": "editor",
+      "locate_with": [],
+      "edit_spec": "Create the file containing exactly: export function isLocked(item: { locked?: boolean }): boolean { return item.locked === true }",
+      "acceptance_check": {
+        "type": "grep",
+        "cmd": "if ((Select-String -Path src/board/lockGuard.ts -SimpleMatch 'export function isLocked') -and (Select-String -Path src/board/lockGuard.ts -SimpleMatch 'item.locked === true')) { exit 0 } else { exit 1 }",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 2,
+      "goal": "Add locked field to BoardShape and import isLocked in useShapes.ts.",
+      "target_file": "src/board/useShapes.ts",
+      "operation": "edit",
+      "tool": "editor",
+      "locate_with": [
+        "graph_get:BoardShape"
+      ],
+      "edit_spec": "In src/board/useShapes.ts, add the import line import { isLocked } from './lockGuard'; after the existing top-level imports. In the BoardShape type/interface declaration, insert a new optional member locked?: boolean; immediately before its closing brace.",
+      "max_edit_lines": 10,
+      "acceptance_check": {
+        "type": "grep",
+        "cmd": "if ((Select-String -Path src/board/useShapes.ts -SimpleMatch 'locked?: boolean') -and (Select-String -Path src/board/useShapes.ts -Pattern 'isLocked.*from.*lockGuard')) { exit 0 } else { exit 1 }",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 3,
+      "goal": "Filter locked shape ids out of the set passed to reorder() inside reorderShapes.",
+      "target_file": "src/board/useShapes.ts",
+      "operation": "edit",
+      "tool": "editor",
+      "locate_with": [
+        "graph_get:reorderShapes",
+        "graph_get:BoardShape"
+      ],
+      "edit_spec": "Inside reorderShapes in src/board/useShapes.ts, change the value passed to reorder() so locked shapes are excluded. Use the existing local array of BoardShape items available in reorderShapes (often named shapes, items, or boardShapes). If a Set is built from shape objects, replace it with new Set(<shapes>.filter((s) => !isLocked(s)).map((s) => s.id)) using the actual collection name and id property. If a Set is built from an incoming id array, add const lockedIds = new Set(<shapes>.filter(isLocked).map((s) => s.id)); before the reorder call and pass new Set(ids.filter((id) => !lockedIds.has(id))) to reorder(). Keep the filter expression on one line so it contains both filter and isLocked.",
+      "max_edit_lines": 10,
+      "acceptance_check": {
+        "type": "grep",
+        "cmd": "if ((Select-String -Path src/board/useShapes.ts -Pattern 'filter.*isLocked') -and (Select-String -Path src/board/useShapes.ts -Pattern 'reorder\\s*\\(')) { exit 0 } else { exit 1 }",
+        "expect": "exit_zero"
+      }
+    }
+  ],
+  "final_acceptance": {
+    "type": "tsc",
+    "cmd": "npx tsc -p tsconfig.app.json --noEmit",
+    "expect": "exit_zero"
+  }
+}

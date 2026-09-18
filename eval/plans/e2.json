@@ -1,0 +1,46 @@
+{
+  "type": "json_object",
+  "task_id": "e2",
+  "planner_model": "deepseek-reasoner",
+  "task": "Add an optional `opacity?: number` field to the BoardShape interface in src/board/useShapes.ts, next to the existing stroke fields.",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Locate the BoardShape interface and its existing stroke fields in useShapes.ts.",
+      "target_file": "src/board/useShapes.ts",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_search:BoardShape",
+        "graph_get:BoardShape"
+      ],
+      "edit_spec": "",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 2,
+      "goal": "Insert an optional opacity field into the BoardShape interface right after the stroke field.",
+      "target_file": "src/board/useShapes.ts",
+      "operation": "edit",
+      "tool": "editor",
+      "locate_with": [
+        "graph_get:BoardShape"
+      ],
+      "edit_spec": "Inside the `interface BoardShape { ... }` block, find the line that declares a stroke-related field (the line starting with `stroke` \u2014 e.g. `stroke?: string;` or `strokeWidth?: number;`). Insert a new line immediately AFTER that stroke line with exactly the text: `  opacity?: number;` (two leading spaces, matching the surrounding indentation). Do not modify any other line.",
+      "acceptance_check": {
+        "type": "grep",
+        "cmd": "Select-String -Path src/board/useShapes.ts -Pattern 'opacity\\?: number'",
+        "expect": "exit_zero"
+      }
+    }
+  ],
+  "final_acceptance": {
+    "type": "tsc",
+    "cmd": "npx tsc -p tsconfig.app.json --noEmit",
+    "expect": "exit_zero"
+  }
+}

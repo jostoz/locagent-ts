@@ -1,0 +1,61 @@
+{
+  "type": "json_object",
+  "task_id": "q1",
+  "planner_model": "deepseek-reasoner",
+  "task": "In the miro-clone board, which handler is wired to the AiChatPanel's onAction prop, and on which line is <AiChatPanel> mounted?",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Name the onAction prop and its expected handler signature in AiChatPanel.tsx.",
+      "target_file": "src/board/AiChatPanel.tsx",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:src/board/AiChatPanel.tsx"
+      ],
+      "edit_spec": "Read the AiChatPanel component declaration and its props interface/type. Report the exact prop name for the action callback (expected: onAction) and the full TypeScript signature of that prop (parameter types and return type). Do not edit anything.",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "Select-String -Path src/board/AiChatPanel.tsx -Pattern \"onAction\"",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 2,
+      "goal": "Find the <AiChatPanel ... /> mount site in Board.tsx and the handler bound to its onAction prop.",
+      "target_file": "src/board/Board.tsx",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:src/board/Board.tsx"
+      ],
+      "edit_spec": "Search Board.tsx for the JSX element <AiChatPanel. Report the 1-based line number of that opening tag, and the identifier/expression passed to the onAction prop (e.g. onAction={handleSend}). If no <AiChatPanel element exists in this file, state exactly 'NOT IN THIS FILE' and stop. Do not edit anything.",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "Select-String -Path src/board/Board.tsx -Pattern \"<AiChatPanel\"",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 3,
+      "goal": "If step 2 did not find the mount site, locate the <AiChatPanel mount and its onAction handler in BoardOverlays.tsx.",
+      "target_file": "src/board/BoardOverlays.tsx",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:src/board/BoardOverlays.tsx"
+      ],
+      "edit_spec": "Search BoardOverlays.tsx for the JSX element <AiChatPanel. Report the 1-based line number of that opening tag and the identifier passed to the onAction prop. If found, this supersedes step 2's answer; otherwise state 'NOT IN THIS FILE'. Do not edit anything.",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "Select-String -Path src/board/BoardOverlays.tsx -Pattern \"<AiChatPanel\"",
+        "expect": "exit_zero"
+      }
+    }
+  ],
+  "final_acceptance": {
+    "type": "none",
+    "cmd": "",
+    "expect": "exit_zero"
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "task_id": "q7",
+  "planner_model": "deepseek-reasoner",
+  "task": "There are two FrameIcon components. Which file has the one used inside FramesPanel, and how does it differ from the other?",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Locate every definition and import of FrameIcon in the repo.",
+      "target_file": "src/board/icons.tsx",
+      "operation": "inspect",
+      "tool": "graph_search",
+      "locate_with": [],
+      "edit_spec": "Search for the exact identifier FrameIcon; record each file path and entity id that defines or imports it.",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 2,
+      "goal": "Identify which FrameIcon is imported and used inside FramesPanel.",
+      "target_file": "src/board/FramesPanel.tsx",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:src/board/FramesPanel.tsx"
+      ],
+      "edit_spec": "Inspect the imports and JSX of FramesPanel to see which module supplies FrameIcon and how it is used there.",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 3,
+      "goal": "Read the FrameIcon definition that FramesPanel uses and compare it with the other FrameIcon definition.",
+      "target_file": "src/board/icons.tsx",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:src/board/icons.tsx"
+      ],
+      "edit_spec": "Inspect the exported FrameIcon component's props, size defaults, and SVG paths; then compare those with the other FrameIcon found in step 1 to state the concrete difference.",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    }
+  ],
+  "final_acceptance": {
+    "type": "none",
+    "cmd": "",
+    "expect": "exit_zero"
+  }
+}

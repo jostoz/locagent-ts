@@ -1,0 +1,45 @@
+{
+  "task_id": "q5",
+  "planner_model": "deepseek-reasoner",
+  "task": "Which components render LayerButtons, and on which lines?",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Locate the LayerButtons entity definition and any other symbols matching LayerButtons in the repo.",
+      "target_file": "src/board/toolbars.tsx",
+      "operation": "inspect",
+      "tool": "graph_search",
+      "locate_with": [
+        "graph_search:LayerButtons"
+      ],
+      "edit_spec": "Run a whole-repo symbol search for the exact token LayerButtons (also try LayerButton as a prefix). Report the defining entity id, its file, and its start line. If the token is not found in src/board/toolbars.tsx, report the file where it was found instead.",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 2,
+      "goal": "List every component that renders LayerButtons along with the line of each render call.",
+      "target_file": "src/board/toolbars.tsx",
+      "operation": "inspect",
+      "tool": "graph_traverse",
+      "locate_with": [
+        "graph_search:LayerButtons",
+        "graph_traverse:renders->LayerButtons"
+      ],
+      "edit_spec": "Traverse incoming 'renders' edges into the LayerButtons entity id found in step 1. For each source node, record the component name, its repo-relative file path, and the exact line number of the render site. Output the final answer as a list of '<component> \u2014 <file>:<line>' pairs; if no renders edges exist, say so explicitly.",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    }
+  ],
+  "final_acceptance": {
+    "type": "none",
+    "cmd": "",
+    "expect": "exit_zero"
+  }
+}

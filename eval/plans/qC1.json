@@ -1,0 +1,59 @@
+{
+  "type": "json_object",
+  "task_id": "qC1",
+  "planner_model": "deepseek-reasoner",
+  "task": "In this board's code, how is a plain text box told apart from a sticky note / post-it? Point me at the check and the files that rely on it.",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Find the entity in the board code that discriminates a plain text box from a sticky note / post-it.",
+      "target_file": "src/board/boardGeometry.ts",
+      "operation": "inspect",
+      "tool": "graph_search",
+      "locate_with": [],
+      "edit_spec": "Search src/board/boardGeometry.ts for the symbol/function whose body compares an element's type/kind against a text-box value versus a sticky/note value (tokens like 'sticky', 'note', 'postit', 'post-it', 'text'). Record the exact entity id and the file it lives in; report the quoted line that performs the comparison. Do NOT edit.",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 2,
+      "goal": "Read the discriminating entity's body to state precisely how text boxes vs sticky notes are told apart.",
+      "target_file": "src/board/boardGeometry.ts",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:<entity id found in step 1>"
+      ],
+      "edit_spec": "Call graph_get with the entity id from step 1 and quote the exact branch/return that separates a plain text box from a sticky note (e.g. the discriminant field name and the two compared values). Name the entity id and file path. Do NOT edit.",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 3,
+      "goal": "List the files/entities that import or call the discriminating check.",
+      "target_file": "src/board/Board.tsx",
+      "operation": "inspect",
+      "tool": "graph_traverse",
+      "locate_with": [
+        "graph_traverse:<entity id found in step 1>"
+      ],
+      "edit_spec": "Traverse incoming 'imports' and 'invokes' edges of the entity id from step 1 and list every caller/importer file path (expected candidates: src/board/Board.tsx, src/board/useShapes.ts, src/board/useStickyNotes.ts, src/board/zorder.ts). Report the final answer as: the check entity id + its file, and the list of dependent files. Do NOT edit.",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    }
+  ],
+  "final_acceptance": {
+    "type": "none",
+    "cmd": "",
+    "expect": "exit_zero"
+  }
+}

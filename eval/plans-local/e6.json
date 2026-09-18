@@ -1,0 +1,50 @@
+{
+  "task_id": "e6",
+  "planner_model": "qwen3.8-27b",
+  "task": "Add `export const isTextBoxNote = (note: { color?: string }) => note.color === undefined` to src/board/useStickyNotes.ts (just after the StickyNote interface). Then in src/board/Board.tsx, import isTextBoxNote from './useStickyNotes' and use it to replace the `note.color === undefined` check inside NoteShape's handleTransform (the fontSize ternary).",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Add the isTextBoxNote export after the StickyNote interface in src/board/useStickyNotes.ts.",
+      "target_file": "src/board/useStickyNotes.ts",
+      "operation": "edit",
+      "tool": "editor",
+      "locate_with": [
+        "graph_get:src/board/useStickyNotes.ts",
+        "graph_get:StickyNote"
+      ],
+      "edit_spec": "Insert immediately after the closing brace of the StickyNote interface declaration a blank line and exactly this line: export const isTextBoxNote = (note: { color?: string }) => note.color === undefined",
+      "max_edit_lines": 2,
+      "acceptance_check": {
+        "type": "grep",
+        "cmd": "if (-not (Select-String -Path src/board/useStickyNotes.ts -Pattern 'export const isTextBoxNote' -Quiet)) { exit 1 }",
+        "expect": "exit_zero"
+      },
+      "_target_is_big": true
+    },
+    {
+      "n": 2,
+      "goal": "Import and use isTextBoxNote in NoteShape's handleTransform fontSize ternary in src/board/Board.tsx.",
+      "target_file": "src/board/Board.tsx",
+      "operation": "edit",
+      "tool": "editor",
+      "locate_with": [
+        "graph_get:src/board/Board.tsx",
+        "graph_get:NoteShape"
+      ],
+      "edit_spec": "Add an import for isTextBoxNote from './useStickyNotes' in the top-level import block; if an existing import from './useStickyNotes' exists, add isTextBoxNote to that named import list instead of creating a duplicate line. Then inside NoteShape's handleTransform function, find the fontSize ternary whose condition is note.color === undefined and replace only that condition with isTextBoxNote(note), preserving surrounding JSX/ternary syntax.",
+      "max_edit_lines": 6,
+      "acceptance_check": {
+        "type": "grep",
+        "cmd": "if (-not ((Select-String -Path src/board/Board.tsx -Pattern 'fontSize[^>]*isTextBoxNote\\(note\\)' -Quiet) -and (Select-String -Path src/board/Board.tsx -Pattern 'useStickyNotes' -Quiet))) { exit 1 }",
+        "expect": "exit_zero"
+      },
+      "_target_is_big": true
+    }
+  ],
+  "final_acceptance": {
+    "type": "tsc",
+    "cmd": "npx tsc -p tsconfig.app.json --noEmit",
+    "expect": "exit_zero"
+  }
+}

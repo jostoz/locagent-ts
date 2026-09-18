@@ -1,0 +1,44 @@
+{
+  "task_id": "q6",
+  "planner_model": "deepseek-reasoner",
+  "task": "What does src/board/Board.tsx import from ./zorder, and where is each of those defined?",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Inspect src/board/Board.tsx and name the exact identifiers imported from the './zorder' module.",
+      "target_file": "src/board/Board.tsx",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:src/board/Board.tsx"
+      ],
+      "edit_spec": "",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 2,
+      "goal": "Inspect src/board/zorder.ts and name the file and line where each imported identifier is defined/exported.",
+      "target_file": "src/board/zorder.ts",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:src/board/zorder.ts"
+      ],
+      "edit_spec": "",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    }
+  ],
+  "final_acceptance": {
+    "type": "none",
+    "cmd": "",
+    "expect": "exit_zero"
+  }
+}

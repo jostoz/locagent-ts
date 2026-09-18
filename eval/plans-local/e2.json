@@ -1,0 +1,45 @@
+{
+  "task_id": "e2",
+  "planner_model": "qwen3.8-27b",
+  "task": "Add an optional `opacity?: number` field to the BoardShape interface in src/board/useShapes.ts, next to the existing stroke fields.",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Locate the BoardShape interface and its existing stroke-related properties in src/board/useShapes.ts.",
+      "target_file": "src/board/useShapes.ts",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:src/board/useShapes.ts"
+      ],
+      "edit_spec": "",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 2,
+      "goal": "Insert an optional opacity field into the BoardShape interface next to the stroke fields.",
+      "target_file": "src/board/useShapes.ts",
+      "operation": "edit",
+      "tool": "editor",
+      "locate_with": [
+        "graph_get:src/board/useShapes.ts"
+      ],
+      "edit_spec": "In src/board/useShapes.ts, inside the named symbol `interface BoardShape`, find the last existing property declaration whose name contains `stroke` (for example a line like `strokeWidth?: number;`). Immediately after that stroke-related property line, insert one new line with two-space indentation: `opacity?: number;`. If an `opacity?: number` property already exists inside BoardShape, make no change. Do not modify any other lines.",
+      "max_edit_lines": 2,
+      "acceptance_check": {
+        "type": "grep",
+        "cmd": "if (-not (Select-String -Path src/board/useShapes.ts -SimpleMatch 'opacity?: number')) { exit 1 }",
+        "expect": "exit_zero"
+      }
+    }
+  ],
+  "final_acceptance": {
+    "type": "tsc",
+    "cmd": "npx tsc -p tsconfig.app.json --noEmit",
+    "expect": "exit_zero"
+  }
+}

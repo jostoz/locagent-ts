@@ -1,0 +1,61 @@
+{
+  "task_id": "q4",
+  "planner_model": "deepseek-reasoner",
+  "task": "List every function that calls reorder from src/board/zorder.ts.",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Identify the exact entity id and signature of the exported reorder function in src/board/zorder.ts.",
+      "target_file": "src/board/zorder.ts",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:src/board/zorder.ts"
+      ],
+      "edit_spec": "",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 2,
+      "goal": "List every entity that invokes (calls) the reorder symbol by traversing incoming 'invokes' edges from reorder.",
+      "target_file": "src/board/zorder.ts",
+      "operation": "inspect",
+      "tool": "graph_traverse",
+      "locate_with": [
+        "graph_get:src/board/zorder.ts#reorder",
+        "graph_traverse:invokes:incoming"
+      ],
+      "edit_spec": "",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 3,
+      "goal": "Cross-check the caller list with a repo-wide text search for the identifier 'reorder(' to name any calling function the graph missed.",
+      "target_file": "src/board/zorder.test.ts",
+      "operation": "inspect",
+      "tool": "graph_search",
+      "locate_with": [
+        "graph_search:reorder"
+      ],
+      "edit_spec": "",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    }
+  ],
+  "final_acceptance": {
+    "type": "none",
+    "cmd": "",
+    "expect": "exit_zero"
+  }
+}

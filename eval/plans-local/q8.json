@@ -1,0 +1,29 @@
+{
+  "task_id": "q8",
+  "planner_model": "qwen3.8-27b",
+  "task": "Which functions invoke textBoxFontSize from src/board/useStickyNotes.ts?",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Identify all caller functions that invoke the textBoxFontSize entity defined in src/board/useStickyNotes.ts.",
+      "target_file": "src/board/useStickyNotes.ts",
+      "operation": "inspect",
+      "tool": "graph_traverse",
+      "locate_with": [
+        "graph_get:src/board/useStickyNotes.ts"
+      ],
+      "edit_spec": "Resolve the function or exported symbol named textBoxFontSize in src/board/useStickyNotes.ts, then traverse incoming invokes edges from that entity and list each caller function name with its file path.",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      },
+      "_target_is_big": true
+    }
+  ],
+  "final_acceptance": {
+    "type": "none",
+    "cmd": "",
+    "expect": "exit_zero"
+  }
+}

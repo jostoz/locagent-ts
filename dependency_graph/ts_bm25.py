@@ -24,12 +24,13 @@ import Stemmer
 
 from dependency_graph.build_graph import (
     NODE_TYPE_CLASS,
+    NODE_TYPE_CONTEXT,
     NODE_TYPE_FILE,
     NODE_TYPE_FUNCTION,
 )
 from dependency_graph.traverse_graph import is_test_file
 
-_INDEXED_TYPES = (NODE_TYPE_FILE, NODE_TYPE_CLASS, NODE_TYPE_FUNCTION)
+_INDEXED_TYPES = (NODE_TYPE_FILE, NODE_TYPE_CLASS, NODE_TYPE_FUNCTION, NODE_TYPE_CONTEXT)
 _CODE_CHAR_CAP = 4000          # per-doc cap on raw source contribution
 _COMMENT_CHAR_CAP = 1500       # per-doc cap on the extracted comment field
 _STEMMER_LANG = 'english'
@@ -93,6 +94,8 @@ def _doc_for_node(nid: str, ndata: dict) -> str:
         parts.append(code[:_CODE_CHAR_CAP])
         if ndata.get('is_component'):
             parts.append('react component jsx')
+        if ndata.get('is_context'):
+            parts.append('react context provider consumer usecontext')
 
     # comment / JSDoc prose as its own field -- see _comments_for. Appended after
     # the capped source so a convention noted past char 4000 is still indexed.

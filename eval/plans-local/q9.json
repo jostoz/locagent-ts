@@ -1,0 +1,28 @@
+{
+  "task_id": "q9",
+  "planner_model": "qwen3.8-27b",
+  "task": "Enumerate the format toolbars defined in src/board/toolbars.tsx and what each one is for.",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Inspect src/board/toolbars.tsx and identify every format toolbar entity/export plus its purpose from names, comments, props, or usage context.",
+      "target_file": "src/board/toolbars.tsx",
+      "operation": "inspect",
+      "tool": "graph_get",
+      "locate_with": [
+        "graph_get:src/board/toolbars.tsx"
+      ],
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      },
+      "_target_is_big": true
+    }
+  ],
+  "final_acceptance": {
+    "type": "none",
+    "cmd": "",
+    "expect": "exit_zero"
+  }
+}

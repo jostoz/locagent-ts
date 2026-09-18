@@ -1,0 +1,45 @@
+{
+  "type": "json_object",
+  "task_id": "q8",
+  "planner_model": "deepseek-reasoner",
+  "task": "Which functions invoke textBoxFontSize from src/board/useStickyNotes.ts?",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Identify the entity that defines textBoxFontSize in useStickyNotes.ts.",
+      "target_file": "src/board/useStickyNotes.ts",
+      "operation": "inspect",
+      "tool": "graph_search",
+      "locate_with": [
+        "graph_search:textBoxFontSize"
+      ],
+      "edit_spec": "Search for the symbol textBoxFontSize inside src/board/useStickyNotes.ts and record the exact enclosing function/hook name that defines or hosts it.",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 2,
+      "goal": "Find every function that invokes textBoxFontSize by traversing invokes edges into it.",
+      "target_file": "src/board/useStickyNotes.ts",
+      "operation": "inspect",
+      "tool": "graph_traverse",
+      "locate_with": [
+        "graph_get:textBoxFontSize"
+      ],
+      "edit_spec": "Traverse invokes edges in reverse targeting the textBoxFontSize entity and list each caller function name and its owning file; report the fully qualified caller set as the answer.",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    }
+  ],
+  "final_acceptance": {
+    "type": "none",
+    "cmd": "",
+    "expect": "exit_zero"
+  }
+}

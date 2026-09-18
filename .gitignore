@@ -192,4 +192,6 @@ wandb/
 eval/results/
 eval/.env
 eval/.cline-data-executor/
+eval/cline-data/
+eval/.tools/
 orchestrator/.checkpoints/

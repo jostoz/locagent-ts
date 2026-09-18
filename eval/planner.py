@@ -18,6 +18,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import List, Optional
 
@@ -25,6 +27,7 @@ _HERE = Path(__file__).resolve().parent
 PROMPT_PATH = _HERE / 'prompts' / 'planner_system.txt'
 MAP_PATH = _HERE / 'fixtures' / 'miro_map.txt'
 PLANS_DIR = _HERE / 'plans'
+ENV_PATH = _HERE / '.env'
 DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
 DEEPSEEK_MODEL = 'deepseek-reasoner'
 
@@ -116,12 +119,40 @@ def mark_big_files(plan: dict, big_files: set) -> dict:
 
 
 # ------------------------------------------------------------------- planning
+def _deepseek_key() -> Optional[str]:
+    """Read the configured key, preferring an explicit process environment."""
+    if key := os.environ.get('DEEPSEEK_API_KEY'):
+        return key
+    if not ENV_PATH.exists():
+        return None
+    for line in ENV_PATH.read_text(encoding='utf-8').splitlines():
+        if line.startswith('DEEPSEEK_API_KEY='):
+            return line.split('=', 1)[1].strip() or None
+    return None
+
+
 def _extract_json(text: str) -> dict:
     text = text.strip()
+    # Cline may wrap a model response in its parameter/function stream.
+    # Keep only the JSON object emitted before that transport suffix.
+    text = text.split('</parameter>', 1)[0].split('</function>', 1)[0].strip()
     if text.startswith('```'):
         text = re.sub(r'^```(?:json)?\s*', '', text)
         text = re.sub(r'\s*```$', '', text)
-    return json.loads(text)
+    # Some completed Qwen outputs omit only the root object's final brace.
+    # Balance that unambiguous truncation before parsing; other malformed JSON
+    # remains an explicit validation failure.
+    depth = text.count('{') - text.count('}')
+    if depth == 1:
+        text += '}'
+    parsed = json.loads(text)
+    # DeepSeek occasionally wraps the requested object as
+    # {"type": "json_object", "content": {...}}.  Treat that transport
+    # envelope as equivalent to a direct JSON-object response.
+    if (isinstance(parsed, dict) and parsed.get('type') == 'json_object'
+            and isinstance(parsed.get('content'), dict)):
+        return parsed['content']
+    return parsed
 
 
 def _client():
@@ -130,12 +161,43 @@ def _client():
     except ImportError as e:
         raise RuntimeError(
             'openai package not installed -- pip install -r requirements-eval.txt') from e
-    key = os.environ.get('DEEPSEEK_API_KEY')
+    key = _deepseek_key()
     if not key:
         raise RuntimeError(
             'DEEPSEEK_API_KEY not set. Never read it from '
             '~/.cline/data/settings/providers.json -- export it in the environment.')
-    return openai.OpenAI(base_url=DEEPSEEK_BASE_URL, api_key=key)
+    return openai.OpenAI(base_url=DEEPSEEK_BASE_URL, api_key=key,
+                         timeout=120.0, max_retries=0)
+
+
+def _complete(messages: list, model: str) -> str:
+    """Return one bounded DeepSeek completion through its HTTP endpoint.
+
+    The locally installed OpenAI SDK can hang despite its configured timeout on
+    this Windows host. The compatible endpoint needs no SDK and urllib gives a
+    reliable per-request timeout for the durable evaluation runner.
+    """
+    key = _deepseek_key()
+    if not key:
+        raise RuntimeError('DEEPSEEK_API_KEY not set.')
+    payload = json.dumps({
+        'model': model,
+        'messages': messages,
+        'response_format': {'type': 'json_object'},
+    }).encode('utf-8')
+    request = urllib.request.Request(
+        f'{DEEPSEEK_BASE_URL}/chat/completions', data=payload,
+        headers={'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'},
+        method='POST')
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            data = json.loads(response.read().decode('utf-8'))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode('utf-8', 'replace')[:500]
+        raise RuntimeError(f'DeepSeek API request failed ({exc.code}): {detail}') from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f'DeepSeek API request failed: {exc.reason}') from exc
+    return data['choices'][0]['message']['content']
 
 
 def plan_task(
@@ -145,13 +207,19 @@ def plan_task(
     refresh: bool = False,
     big_files: Optional[set] = None,
     model: str = DEEPSEEK_MODEL,
+    plans_dir: Optional[Path] = None,
 ) -> dict:
     """Call DeepSeek to plan *task_text*; cache to ``eval/plans/<task_id>.json``.
     Returns the cached plan unless *refresh* is set."""
-    PLANS_DIR.mkdir(parents=True, exist_ok=True)
-    cache_path = PLANS_DIR / f'{task_id}.json'
+    output_dir = plans_dir or PLANS_DIR
+    output_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = output_dir / f'{task_id}.json'
+    alternate_cache_path = output_dir / f'{task_id}.plan.json'
     if cache_path.exists() and not refresh:
         plan = json.loads(cache_path.read_text(encoding='utf-8'))
+        return mark_big_files(plan, big_files or set())
+    if alternate_cache_path.exists() and not refresh:
+        plan = json.loads(alternate_cache_path.read_text(encoding='utf-8'))
         return mark_big_files(plan, big_files or set())
 
     system = PROMPT_PATH.read_text(encoding='utf-8')
@@ -162,14 +230,10 @@ def plan_task(
         f'REPO MODULE MAP (miro-clone, digest only -- no source):\n{repo_map}'
     )
 
-    client = _client()
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[{'role': 'system', 'content': system},
-                  {'role': 'user', 'content': user}],
-        response_format={'type': 'json_object'},
-    )
-    raw = resp.choices[0].message.content
+    raw = _complete([
+        {'role': 'system', 'content': system},
+        {'role': 'user', 'content': user},
+    ], model)
     plan = _extract_json(raw)
     plan.setdefault('task_id', task_id)
     plan.setdefault('planner_model', model)

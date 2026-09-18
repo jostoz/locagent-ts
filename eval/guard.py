@@ -116,6 +116,7 @@ def analyze(
     expect_edit: bool = False,
     baseline_ref: Optional[str] = None,
     step_done_marker: str = 'STEP DONE',
+    shell: str = 'windows',
 ) -> GuardReport:
     rep = GuardReport()
 
@@ -128,9 +129,9 @@ def analyze(
     # --- shell misuse ---------------------------------------------------
     cmds = tr.all_shell_commands()
     joined_cmds = '\n'.join(cmds)
-    if _WRONG_SHELL_RE.search(joined_cmds) or any(
+    if shell == 'windows' and (_WRONG_SHELL_RE.search(joined_cmds) or any(
             _WRONG_SHELL_RE.search(o.get('result') or '')
-            for tc in tr.tool_calls for o in tc.outputs):
+            for tc in tr.tool_calls for o in tc.outputs)):
         rep.add('wrong_shell', _WRONG_SHELL_RE.search(joined_cmds).group(0)
                 if _WRONG_SHELL_RE.search(joined_cmds) else 'in tool output')
     if _SHELL_WRITE_RE.search(joined_cmds):
@@ -149,7 +150,9 @@ def analyze(
     # --- delegation / give-up -----------------------------------------
     if _DELEGATION_RE.search(tr.final_text):
         rep.add('paste_this', _DELEGATION_RE.search(tr.final_text).group(0))
-    if _GAVE_UP_RE.search(tr.final_text) or tr.finish_reason not in ('completed', ''):
+    completed_step = step_done_marker.lower() in tr.final_text.lower()
+    if ((_GAVE_UP_RE.search(tr.final_text) and not completed_step)
+            or tr.finish_reason not in ('completed', '')):
         rep.add('gave_up', tr.finish_reason or _GAVE_UP_RE.search(tr.final_text).group(0))
 
     # --- big-file reads ---------------------------------------------

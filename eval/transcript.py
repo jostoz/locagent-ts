@@ -211,6 +211,23 @@ def parse(text: str) -> Transcript:
                                 'error': o.get('error'),
                                 'success': o.get('success'),
                             })
+                elif isinstance(out, dict):
+                    # MCP tools in Cline 3 return {content:[{type,text}],
+                    # structuredContent:{...}} rather than the builtin-tool
+                    # list shape above.
+                    texts = []
+                    for block in out.get('content') or []:
+                        if isinstance(block, dict) and isinstance(block.get('text'), str):
+                            texts.append(block['text'])
+                    structured = out.get('structuredContent')
+                    if isinstance(structured, dict):
+                        texts.extend(str(v) for v in structured.values() if isinstance(v, str))
+                    tc.outputs.append({
+                        'query': None,
+                        'result': '\n'.join(texts)[:4000],
+                        'error': out.get('error'),
+                        'success': not out.get('isError', False),
+                    })
 
     if not t.iterations:
         t.iterations = cur_iter

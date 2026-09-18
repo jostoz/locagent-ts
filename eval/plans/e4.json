@@ -1,0 +1,45 @@
+{
+  "task_id": "e4",
+  "planner_model": "deepseek-reasoner",
+  "task": "In src/board/Board.tsx, the toolbarButtonStyle helper (~line 4906) returns a CSSProperties object. Add `transition: 'background 120ms ease'` to that returned object. Nothing else.",
+  "steps": [
+    {
+      "n": 1,
+      "goal": "Locate the toolbarButtonStyle helper and the exact return object literal it produces in src/board/Board.tsx.",
+      "target_file": "src/board/Board.tsx",
+      "operation": "inspect",
+      "tool": "graph_search",
+      "locate_with": [
+        "graph_search:toolbarButtonStyle"
+      ],
+      "edit_spec": "",
+      "acceptance_check": {
+        "type": "none",
+        "cmd": "",
+        "expect": "exit_zero"
+      }
+    },
+    {
+      "n": 2,
+      "goal": "Add `transition: 'background 120ms ease',` to the CSSProperties object returned by toolbarButtonStyle.",
+      "target_file": "src/board/Board.tsx",
+      "operation": "edit",
+      "tool": "editor",
+      "locate_with": [
+        "graph_get:toolbarButtonStyle"
+      ],
+      "edit_spec": "Inside the function `toolbarButtonStyle`, find its `return { ... }` statement whose object literal is typed as CSSProperties. Insert a new property line `transition: 'background 120ms ease',` immediately after the opening `return {` (or immediately after the first existing property line inside that returned object), keeping every existing property and all surrounding code byte-for-byte unchanged. Do not modify any other function or object literal in the file.",
+      "max_edit_lines": 10,
+      "acceptance_check": {
+        "type": "grep",
+        "cmd": "grep -c \"background 120ms ease\" src/board/Board.tsx",
+        "expect": "exit_zero"
+      }
+    }
+  ],
+  "final_acceptance": {
+    "type": "tsc",
+    "cmd": "npx tsc -p tsconfig.app.json --noEmit",
+    "expect": "exit_zero"
+  }
+}
