@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
-from eval import lmstudio
+from eval import isolated_env, lmstudio
 from eval.transcript import Transcript, parse
 
 DEFAULT_TIMEOUT = 300
@@ -92,12 +92,15 @@ def build_cmd(
     compaction: str = 'agentic',
     thinking: str = 'none',
     timeout_s: int = DEFAULT_TIMEOUT,
+    data_dir: Optional[str] = None,
 ) -> List[str]:
     cmd = [
         CLINE, '-P', provider, '-m', model, '-c', repo,
         '--thinking', thinking, '--auto-approve', 'true',
         '--compaction', compaction, '--json',
     ]
+    if data_dir:
+        cmd += ['--data-dir', data_dir]
     if timeout_s:
         cmd += ['-t', str(timeout_s)]
     if system:
@@ -120,9 +123,21 @@ def run_once(
     step: Optional[int] = None,
     timeout_s: int = DEFAULT_TIMEOUT,
     expect_mcp: bool = True,
+    disable_shell: bool = False,
+    data_dir: Optional[str] = None,
 ) -> RunResult:
+    """``disable_shell=True`` runs the executor under an isolated
+    ``--data-dir`` whose ``global-settings.json`` removes ``run_commands``
+    from the model's toolset entirely (verified: the model cannot call a tool
+    that was never offered, unlike a ``.clinerules`` request it can ignore)
+    and whose MCP config carries only ``locagent`` (no Orca tool bleed-through).
+    See ``eval/isolated_env.py``. Pass an explicit *data_dir* to reuse one
+    already built, or to opt into isolation without disabling the shell."""
+    if disable_shell and data_dir is None:
+        data_dir = str(isolated_env.build_executor_data_dir())
     cmd = build_cmd(provider=provider, model=model, repo=repo, prompt=prompt,
-                    system=system, compaction=compaction, timeout_s=timeout_s)
+                    system=system, compaction=compaction, timeout_s=timeout_s,
+                    data_dir=data_dir)
     Path(run_path).parent.mkdir(parents=True, exist_ok=True)
 
     env = dict(os.environ)
@@ -207,6 +222,8 @@ if __name__ == '__main__':
     ap.add_argument('--timeout', type=int, default=DEFAULT_TIMEOUT)
     ap.add_argument('--run-path', default='eval/results/_adhoc.jsonl')
     ap.add_argument('--retry', action='store_true')
+    ap.add_argument('--disable-shell', action='store_true',
+                    help='run with an isolated Cline data directory that disables run_commands')
     args = ap.parse_args()
 
     sys_prompt = None
@@ -216,7 +233,8 @@ if __name__ == '__main__':
 
     kw = dict(task_id='_adhoc', condition='_adhoc', prompt=args.prompt,
               repo=args.repo, run_path=args.run_path, provider=args.provider,
-              system=sys_prompt, compaction=args.compaction, timeout_s=args.timeout)
+              system=sys_prompt, compaction=args.compaction, timeout_s=args.timeout,
+              disable_shell=args.disable_shell)
     r = run_with_retry(model=args.model, **kw) if args.retry else run_once(model=args.model, **kw)
     tr = r.transcript
     print(json.dumps({

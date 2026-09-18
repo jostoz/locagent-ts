@@ -191,4 +191,5 @@ wandb/
 # metrics, planner code and cached plans ARE tracked.
 eval/results/
 eval/.env
+eval/.cline-data-executor/
 orchestrator/.checkpoints/
