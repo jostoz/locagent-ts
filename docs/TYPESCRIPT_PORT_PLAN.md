@@ -132,10 +132,13 @@ Nuevo `dependency_graph/ts_build_graph.py`. Reutiliza el ensamblado networkx, el
 
 **Estado (2026-09-08): `locagent_mcp.py` funcional, probado sobre miro-clone vía protocolo stdio real.**
 
-- ✅ `locagent_mcp.py` con `mcp==1.13.1` (`FastMCP`, transport `stdio`). 4 tools:
+- ✅ `locagent_mcp.py` con `mcp==1.13.1` (`FastMCP`, transport `stdio`). 5 tools:
   - `graph_search(query, max_results=10, scope="all"|"function"|"class"|"file")` →
     **fusión RRF** de `ts_bm25` + `fuzzy_retriever` → lista con id, tipo, `file:line`, firma corta,
     flag `[component]`.
+  - `graph_semantic_search(query, max_results=10)` → localización semántica opcional con
+    `jegrep`: valida paths y scores contra nodos file del grafo, ignora rangos/snippets no
+    confiables y cae a `graph_search` (BM25) si falta el binario, falla o no devuelve hits.
   - `graph_get(entity_id, mode="skeleton"|"full")` → skeleton (attr del nodo, o `compress_file_ts`
     para files) o código con números de línea. `full` sobre entidad > 400 líneas devuelve skeleton +
     aviso (Board = 6325 líneas → no se inlinea). `_resolve_id` tolera nombre pelado / falta de prefijo

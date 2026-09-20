@@ -1,0 +1,14 @@
+task: TASK-002-jev-semantic-search
+agent: builder
+timestamp: 2026-09-20T20:48:43Z
+inputs: []
+outputs:
+  - raw: |
+      [{"path":"locagent_mcp.py","change":"added import subprocess (L30); _JEGREP_TIMEOUT_S, _jegrep_hits(), @mcp.tool() graph_semantic_search(query,max_results=10) at L478-537"}]
+verification:
+  judge: pending
+  review: pending
+unresolved: []
+next_action: review
+message: |
+  graph_semantic_search added to locagent_mcp.py: jegrep primary + graph_search fallback

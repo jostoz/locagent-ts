@@ -1,0 +1,18 @@
+task: TASK-002-jev-semantic-search
+agent: builder
+timestamp: 2026-09-20T23:29:01Z
+inputs: []
+outputs:
+  - raw: |
+      [{"path":"locagent_mcp.py","change":"resuelve jegrep en Windows, normaliza paths, valida scores/ids y registra fallback"},{"path":"docs/TYPESCRIPT_PORT_PLAN.md","change":"documenta graph_semantic_search como quinta tool opcional con fallback BM25"}]
+verification:
+  judge: PASS
+  review: pending
+  smoke:
+    command: ".venv/Scripts/python.exe <temporary integrated smoke>; script removed after execution"
+    repo: "C:/Users/joz/Documents/miro-clone"
+    result: "PASS real: graph_semantic_search invoked jegrep v0.1.0 via OpenRouter and returned 4 semantic hits headed by src/board/useBoardImages.ts (0.860), src/board/toolbars.tsx (0.520) and src/board/Board.tsx (0.770); output excluded ranges/snippets. Separate controlled smoke proved shutil.which=None fallback byte-identical to graph_search."
+unresolved: []
+next_action: review
+message: |
+  Jev semantic search corregida; smoke y judge pasan

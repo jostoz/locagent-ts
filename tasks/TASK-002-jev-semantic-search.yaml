@@ -1,0 +1,36 @@
+id: TASK-002-jev-semantic-search
+title: Añadir graph_semantic_search a locagent_mcp.py con jegrep como fuente primaria de localización
+objective: >
+  Implementar la herramienta graph_semantic_search en locagent_mcp.py usando
+  el JSON de jegrep como fuente primaria de localización. La salida debe
+  contener solo paths y scores (ignorar los rangos que devuelve jegrep),
+  validar los paths devueltos contra el grafo de dependencias, listar las
+  entidades principales encontradas y recomendar graph_traverse para la
+  navegación de seguimiento. Cuando el binario jegrep no exista, no haya
+  credenciales, ocurra un error de red, cualquier otro error o jegrep
+  devuelva cero hits, caer al comportamiento existente de graph_search (BM25).
+authority:
+  can_modify:
+    - locagent_mcp.py
+    - requirements.txt
+    - tests existentes pertinentes
+    - docs/TYPESCRIPT_PORT_PLAN.md
+context: >
+  locagent_mcp.py ya expone graph_search (BM25 sobre el grafo de dependencias,
+  ver dependency_graph/ts_bm25.py) y graph_traverse para navegación. jegrep es
+  la fuente semántica externa que devuelve JSON con paths, scores y rangos;
+  esta tarea lo integra como fuente primaria sin romper el comportamiento
+  actual: si algo falla (binario ausente, credenciales, red u otro error) o
+  hay cero hits, se cae a graph_search. La smoke de referencia es la tarea de
+  estrés opacidad del corpus miro-clone (useBoardImages.ts / Board.tsx /
+  toolbars.tsx).
+acceptance:
+  - "Smoke de la tarea de estrés opacidad: graph_semantic_search encuentra
+    useBoardImages.ts, Board.tsx y toolbars.tsx"
+  - El fallback a graph_search (BM25) funciona sin credenciales de jegrep
+  - Los rangos que devuelve jegrep no aparecen en la salida (solo paths y scores)
+  - "bash scripts/judge.sh current → PASS"
+  - "Existe una review no vacía en
+    state/reviews/TASK-002-jev-semantic-search_review.md"
+priority: high
+status: pending

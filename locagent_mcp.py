@@ -13,6 +13,7 @@ Tools:
   graph_get(entity_id, mode="skeleton"|"full")
   graph_traverse(entity_id, edge_types=None, direction="both", hops=2)
   graph_map(max_depth=3)
+  graph_semantic_search(query, max_results=10)   # optional; needs `jegrep` on PATH, else falls back to graph_search
 
 Wire into Cline (`~/.cline/data/settings/cline_mcp_settings.json`):
   "locagent": {
@@ -27,6 +28,8 @@ import json
 import logging
 import os
 import pickle
+import shutil
+import subprocess
 import sys
 import time
 import warnings
@@ -471,6 +474,90 @@ def graph_search(query: str, max_results: int = 10, scope: str = 'all') -> str:
         out.append(f'- {nid}  ({nd.get("type")}{tag}, {_loc(nid, nd)})'
                    + (f'\n    {head[:160]}' if head else ''))
     out.append('\nNext: graph_get("<id>") for code, graph_traverse("<id>") for neighbours.')
+    return '\n'.join(out)
+
+
+_JEGREP_TIMEOUT_S = 10
+
+
+def _jegrep_score(value):
+    """Coerce a jegrep score to float; missing or invalid values become 0.0."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _jegrep_hits(query):
+    """Run external `jegrep` and return [(path, content_score, name_score)] for hits
+    whose normalized path is a file node in the graph. Raises on any failure."""
+    exe = shutil.which('jegrep')
+    if exe is None:
+        raise RuntimeError('jegrep not found on PATH (PATHEXT-aware)')
+    proc = subprocess.run(
+        [exe, query, '.', '--json', '--quiet'],
+        cwd=str(REPO), capture_output=True, text=True, timeout=_JEGREP_TIMEOUT_S)
+    if proc.returncode != 0:
+        raise RuntimeError(f'jegrep exited {proc.returncode}')
+    data = json.loads(proc.stdout)
+    _ensure_loaded()
+    g = _STATE['graph']
+    out = []
+    for h in (data.get('hits') or []):
+        p = str(h.get('path', '')).replace('\\', '/').strip()
+        while p.startswith('./'):
+            p = p[2:]
+        if not p:
+            continue
+        if Path(p).is_absolute():
+            # Absolute paths (e.g. "C:/repo/src/x.ts" or "/repo/src/x.ts") are
+            # relativized against REPO; hits outside the repo are dropped.
+            try:
+                p = Path(p).resolve().relative_to(REPO).as_posix()
+            except (ValueError, OSError):
+                continue
+        nd = g.nodes.get(p)
+        if nd is None or nd.get('type') != NODE_TYPE_FILE:
+            continue
+        out.append((p, _jegrep_score(h.get('content_score')),
+                    _jegrep_score(h.get('name_score'))))
+    return out
+
+
+@mcp.tool()
+def graph_semantic_search(query: str, max_results: int = 10) -> str:
+    """Semantic search via external `jegrep` (paths + scores only).
+
+    Runs `jegrep <query> . --json --quiet`, keeps hits whose path is a known file in
+    the graph, and lists each file's top-level entities. On any failure (missing
+    binary, timeout, bad JSON) or zero usable hits it falls back to graph_search.
+    """
+    max_results = max(1, min(max_results, 30))
+    try:
+        hits = _jegrep_hits(query)
+    except Exception as exc:
+        # Fallback reason goes to stderr only -- stdout is the MCP JSON-RPC channel.
+        logging.getLogger(__name__).warning(
+            'graph_semantic_search: falling back to graph_search (%r)', exc)
+        return graph_search(query, max_results)
+    if not hits:
+        return graph_search(query, max_results)
+    g = _STATE['graph']
+    hits.sort(key=lambda t: (t[1] + t[2]), reverse=True)
+    out = [f'semantic search (jegrep) for "{query}": {len(hits)} hit(s)']
+    for p, cs, ns in hits[:max_results]:
+        kids = sorted(v for _, v, ed in g.out_edges(p, data=True)
+                      if ed.get('type') == 'contains'
+                      and g.nodes[v].get('type') in (NODE_TYPE_FUNCTION, NODE_TYPE_CLASS,
+                                                     NODE_TYPE_CONTEXT)
+                      and ':' in v
+                      and '.' not in v.split(':', 1)[1])
+        ents = ', '.join(v.split(':', 1)[1] for v in kids[:12])
+        more = f' (+{len(kids) - 12} more)' if len(kids) > 12 else ''
+        out.append(f'- {p}  [content={cs:.3f}, name={ns:.3f}]')
+        if ents:
+            out.append(f'    entities: {ents}{more}')
+    out.append('Next step: graph_traverse("<path>") to walk a file\'s dependencies.')
     return '\n'.join(out)
 
 
