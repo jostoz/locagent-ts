@@ -1,0 +1,14 @@
+task: TASK-001-plan-step-to-paios-packet
+agent: builder
+timestamp: 2026-11-10T17:06:21Z
+inputs: []
+outputs:
+  - raw: |
+      [{"path":"eval/paios_packet.py","change":"reescrito: packet_for_plan (ex packet_for_step), un YAML por tarea completa con plan_steps anidado, acceptance gateado en final_acceptance del plan, nunca en acceptance_check de un step individual"},{"path":"eval/test_paios_packet.py","change":"reescrito: 3 tests sobre packet_for_plan, incluyendo test_acceptance_gates_on_final_acceptance_not_step_checks (regresion del failure mode de wiring parcial de opacidad)"},{"path":"docs/TYPESCRIPT_PORT_PLAN.md","change":"seccion Stage 2 actualizada: decision de granularidad resuelta y justificada por escrito, documentado que verify.sh no cruza a miro-clone (invariante 6) y el packet declara external_effect.verification: human_review_required"},{"path":"tasks/TASK-e2.yaml","change":"packet real generado desde eval/plans/e2.json via paios_packet.main(), claimed con scripts/claim.sh"},{"path":"eval/results/20261110T170457Z/","change":"prueba de regresion real: run_matrix.py --condition planned --tasks e2 contra miro-clone, acceptance_ok:true (tsc + grep opacity pasaron), ambos steps del plan corrieron"}]
+verification:
+  judge: pending
+  review: pending
+unresolved: []
+next_action: review
+message: |
+  paios_packet.py: un packet por plan (no por step), gate en final_acceptance. Regresión validada con corrida real sobre e2.
