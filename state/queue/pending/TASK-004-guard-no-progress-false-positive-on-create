@@ -1,0 +1,57 @@
+id: TASK-004-guard-no-progress-false-positive-on-create
+title: "guard.analyze(): no_progress falso positivo en operation=create (git diff ignora archivos untracked)"
+objective: >
+  eval/guard.py::analyze() detecta `no_progress` midiendo
+  `diff_numstat(repo, baseline_ref)` (eval/guard.py:78-80), que ejecuta
+  literalmente `git diff --numstat <baseline_ref>` -- por diseño de git, esto
+  SOLO compara archivos ya trackeados contra el baseline. Un archivo recién
+  creado por el ejecutor (operation: "create" en el plan) queda `untracked`
+  hasta un `git add` explícito que nadie corre en el worktree del executor,
+  así que `touched = sum(changed.values())` siempre da 0 para una creación
+  exitosa, sin importar el contenido real del archivo. Como `no_progress` es
+  fatal para `operation in {create, edit}` (eval/run_matrix.py:213-220,218),
+  esto corta el plan completo apenas termina el primer step de creación,
+  aunque el archivo se haya creado correctamente -- confirmado en la corrida
+  real de `e3` (2026-11-10, eval/results/20261110T184104Z/planned-e3.summary.json):
+  el step 1 (`operation: create`, crea src/board/lockGuard.ts) tuvo éxito real
+  (acceptance post-hoc confirma "file exists"), pero `guard_flags: ['no_progress']`
+  rompió el loop antes de llegar al step 3 (el wiring real en useShapes.ts) --
+  exactamente el failure mode de "wiring incompleto" que TASK-001 ya atacó
+  desde el lado de la granularidad de packets, pero esta causa es anterior:
+  ni siquiera llega a ejecutarse el step de wiring.
+  Arreglar `diff_numstat` (o el caller en `analyze()`) para que cuente
+  archivos nuevos untracked como "touched" cuando `operation == "create"`, sin
+  romper la detección real de "0 cambios" para `operation == "edit"` (donde sí
+  debe seguir siendo fatal: el archivo ya existe y trackeado, 0 líneas
+  cambiadas es genuinamente no_progress ahí).
+authority:
+  can_modify:
+    - eval/**
+context: >
+  Encontrado al correr `python -m eval.run_matrix --condition planned` sobre
+  las 18 tareas del corpus (eval/miro_clone_localization.jsonl) tras el fix
+  de reasoning/contextWindow del ejecutor local de TASK-003. 4/6 tareas edit
+  pasaron acceptance_ok (e1, e2, e4, e6); e3 falló por este bug (wiring nunca
+  corrió); e5 falló por una razón no relacionada (error TS6133 trivial,
+  variable sin usar -- no es scope de esta tarea). Ver
+  eval/results/20261110T184104Z/ para la corrida completa y
+  eval/plans/e3.json para el plan de 3 steps que expone el bug.
+acceptance:
+  - "Existe un test de regresión en eval/test_guard.py (o módulo nuevo
+    equivalente) que reproduce el caso exacto: un worktree git real donde un
+    step operation=create agrega un archivo nuevo sin trackearlo, y confirma
+    que analyze() con expect_edit=True NO agrega el flag no_progress para ese
+    caso -- y SÍ lo sigue agregando para operation=edit con 0 líneas
+    cambiadas sobre un archivo ya trackeado (caso que no debe romperse)."
+  - "Re-correr la tarea e3 real (python -m eval.run_matrix --condition planned
+    --tasks e3 --plans-dir eval/plans --sandbox-image locagent-cline:stage1-v4
+    --repo C:/Users/joz/Documents/miro-clone) y confirmar que los 3 steps del
+    plan corren (no se corta en el step 1), con el resultado final
+    (acceptance_ok) documentado sin importar si termina true o false --
+    el criterio de esta tarea es que el wiring se INTENTE, no que la edición
+    final sea perfecta."
+  - "bash scripts/judge.sh current -> PASS"
+  - "Existe una review no vacía en
+    state/reviews/TASK-004-guard-no-progress-false-positive-on-create_review.md"
+priority: medium
+status: pending
