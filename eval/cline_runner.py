@@ -23,12 +23,13 @@ File-based Cline hooks do not dispatch in this CLI build, so there is no
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import Iterable, List, Optional
 
 from eval import isolated_env, lmstudio
 from eval.transcript import Transcript, parse
@@ -100,9 +101,13 @@ def build_cmd(
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     max_tokens: int = 8192,
+    temperature: float = 0.0,
+    reasoning_max_tokens: int = 0,
     sandbox_image: Optional[str] = None,
     disable_locagent: bool = False,
     enable_tgrep: bool = False,
+    disabled_tools: Iterable[str] = (),
+    container_name: Optional[str] = None,
 ) -> List[str]:
     executor_repo = '/workspace' if sandbox_image else repo
     # CLINE resolves to a Windows npm shim on the host. The container has its
@@ -127,6 +132,7 @@ def build_cmd(
         # credentials, Docker socket, or evaluator output directory is visible.
         cmd = [
             'docker', 'run', '--rm', '--read-only',
+        ] + (['--name', container_name] if container_name else []) + [
             '--tmpfs', '/tmp:rw,noexec,nosuid,size=1g',
             '--tmpfs', '/state:rw,noexec,nosuid,size=64m',
             '--mount', f'type=bind,source={Path(repo).resolve()},target=/workspace',
@@ -137,8 +143,11 @@ def build_cmd(
             '-e', 'CLINE_API_KEY',
             '-e', 'CLINE_BASE_URL',
             '-e', 'CLINE_MAX_TOKENS',
+            '-e', f'CLINE_TEMPERATURE={temperature}',
+            '-e', f'CLINE_REASONING_MAX_TOKENS={reasoning_max_tokens}',
             '-e', f'DISABLE_LOCAGENT_MCP={1 if disable_locagent else 0}',
             '-e', f'ENABLE_TGREP_MCP={1 if enable_tgrep else 0}',
+            '-e', f'CLINE_DISABLED_TOOLS={",".join(disabled_tools)}',
             sandbox_image,
         # The image entrypoint already executes its own `cline` binary after
         # installing ephemeral config and MCP state.
@@ -166,9 +175,12 @@ def run_once(
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     max_tokens: int = 8192,
+    temperature: float = 0.0,
+    reasoning_max_tokens: int = 0,
     sandbox_image: Optional[str] = None,
     disable_locagent: bool = False,
     enable_tgrep: bool = False,
+    disabled_tools: Optional[Iterable[str]] = None,
 ) -> RunResult:
     """``disable_shell=True`` runs the executor under an isolated
     ``--data-dir`` whose ``global-settings.json`` removes ``run_commands``
@@ -176,17 +188,41 @@ def run_once(
     that was never offered, unlike a ``.clinerules`` request it can ignore)
     and whose MCP config carries only ``locagent`` (no Orca tool bleed-through).
     See ``eval/isolated_env.py``. Pass an explicit *data_dir* to reuse one
-    already built, or to opt into isolation without disabling the shell."""
-    if disable_shell and data_dir is None:
-        data_dir = str(isolated_env.build_executor_data_dir())
+    already built, or to opt into isolation without disabling the shell.
+
+    *disabled_tools* removes named tools from the executor's toolset instead
+    of only asking for their absence in the system prompt -- pass it even
+    without *disable_shell* to force the same real removal for other tools
+    (e.g. ``search_codebase``). Outside a sandbox it is forwarded to
+    ``isolated_env.build_executor_data_dir``. Inside ``--sandbox-image`` the
+    image's own entrypoint writes ``global-settings.json`` from the
+    ``CLINE_DISABLED_TOOLS`` env var this sets instead -- the external
+    *data_dir* mechanism does not apply there, because the entrypoint
+    already fixes its own ``--data-dir /state``."""
+    if data_dir is None and not sandbox_image and (disable_shell or disabled_tools is not None):
+        kwargs = {'disabled_tools': list(disabled_tools)} if disabled_tools is not None else {}
+        data_dir = str(isolated_env.build_executor_data_dir(**kwargs))
+    # `docker run --rm` in the foreground: killing the *client* process on a
+    # host-side timeout (below) does not stop the container itself under
+    # dockerd -- it is a separate process tree. Name every sandboxed
+    # container so a timeout can `docker kill` it explicitly instead of
+    # leaking a container that keeps holding the single-parallel-slot LM
+    # Studio connection open for every run after it.
+    container_name = None
+    if sandbox_image:
+        safe_task = re.sub(r'[^a-zA-Z0-9_.-]', '-', f'{task_id}-{condition}')
+        container_name = f'locagent-eval-{safe_task}-{os.getpid()}-{int(time.time())}'
     cmd = build_cmd(provider=provider, model=model, repo=repo, prompt=prompt,
                     system=system, compaction=compaction, thinking=thinking,
                     timeout_s=timeout_s,
                     data_dir=data_dir, api_key=api_key, base_url=base_url,
-                    max_tokens=max_tokens,
+                    max_tokens=max_tokens, temperature=temperature,
+                    reasoning_max_tokens=reasoning_max_tokens,
                     sandbox_image=sandbox_image,
                     disable_locagent=disable_locagent,
-                    enable_tgrep=enable_tgrep)
+                    enable_tgrep=enable_tgrep,
+                    disabled_tools=disabled_tools or (),
+                    container_name=container_name)
     Path(run_path).parent.mkdir(parents=True, exist_ok=True)
 
     env = dict(os.environ)
@@ -216,6 +252,9 @@ def run_once(
         exit_code = -9
         stderr_tail = (e.stderr or b'')[-2000:].decode('utf-8', 'replace') \
             if isinstance(e.stderr, (bytes, bytearray)) else (e.stderr or '')[-2000:]
+        if container_name:
+            subprocess.run(['docker', 'kill', container_name],
+                           capture_output=True, text=True, timeout=30)
     wall_s = round(time.time() - t0, 1)
 
     text = Path(run_path).read_text(encoding='utf-8', errors='replace')

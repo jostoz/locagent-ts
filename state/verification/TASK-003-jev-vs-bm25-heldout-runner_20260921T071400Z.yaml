@@ -1,0 +1,24 @@
+task: TASK-003-jev-vs-bm25-heldout-runner
+agent: verifier
+timestamp: 2026-09-21T07:14:00Z
+result: REJECT
+judge: PASS
+review: REJECT
+protected_zones: unchanged
+checks:
+  judge_current: "bash scripts/judge.sh current -> PASS: current (reproduced)"
+  git_diff_protected: "git diff --stat HEAD -- contracts/ scripts/judge.sh scripts/verify.sh AGENTS.md decisions/ -> empty (reproduced)"
+  git_ref_matches_baseline: "state/baselines/TASK-003-jev-vs-bm25-heldout-runner.git_ref (25d895b5a8651977f4492df5d748f6d12fc642cb) == current HEAD (reproduced)"
+  review_present: "state/reviews/TASK-003-jev-vs-bm25-heldout-runner_review.md non-empty, contains RULE:/ISSUE:/veredicto (reproduced)"
+  builder_delta_present: "state/deltas/20260921T070856Z_TASK-003-jev-vs-bm25-heldout-runner_builder.yaml (reproduced)"
+missing_evidence:
+  - "No on-disk artifact under eval/results/ shows acceptance_ok: true for either arm (bm25 or jev). Only eval/results/20260921T070610Z-jev-vs-bm25/ exists: bm25.json has edit_applied: false, end_to_end_success: false, acceptance_ok: false, cline_exit_code: 137 (operator-interrupted); jev.json does not exist (jev-h1.jsonl transcript truncated mid tool-call)."
+  - "The one bm25 run that previously reached acceptance_ok: true (20260921T062159Z) was overwritten before it could be preserved as durable evidence and no longer exists on disk."
+  - "jev arm's positive canonicalization path (real jegrep hit -> accepted AST entity) has never been exercised end-to-end in this environment because OPENROUTER_API_KEY / TYPESAFE_API_KEY is absent (presence/absence only checked here, not the value, per instruction). Only the fail-closed rejection path and an offline synthetic unit test have been exercised; this is documented as a known limitation in both the builder delta and the review, not hidden."
+queue_state: "unchanged: TASK-003-jev-vs-bm25-heldout-runner remains in state/queue/in_progress/ (not moved to done)"
+next_action: "Builder (or next session with OPENROUTER_API_KEY/TYPESAFE_API_KEY available) must run `python -m eval.run_jev_vs_bm25 --repo C:/Users/joz/Documents/miro-clone --sandbox-image locagent-cline:stage1-v4 --timeout 300` to completion and preserve the resulting eval/results/<run>/ directory (both bm25.json and jev.json reaching the GESTADO validated phase, at least one with acceptance_ok: true) before re-submitting for review/verification. Verifier cannot manufacture this evidence and does not implement or repair code per role scope."
+message: |
+  REJECT confirmed independently. judge PASS, protected zones unchanged, review present and non-empty,
+  but review verdict is REJECT (missing durable two-arm end-to-end run artifact) and no acceptance
+  condition of tasks/TASK-003-jev-vs-bm25-heldout-runner.yaml is overridden by this verification.
+  Task NOT moved to done; remains in_progress pending a fresh, preserved end-to-end run.

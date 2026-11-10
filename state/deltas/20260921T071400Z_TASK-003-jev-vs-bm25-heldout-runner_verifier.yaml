@@ -1,0 +1,21 @@
+task: TASK-003-jev-vs-bm25-heldout-runner
+agent: verifier
+timestamp: 2026-09-21T07:14:00Z
+inputs:
+  - state/deltas/20260921T070856Z_TASK-003-jev-vs-bm25-heldout-runner_builder.yaml
+  - state/reviews/TASK-003-jev-vs-bm25-heldout-runner_review.md
+outputs:
+  - state/verification/TASK-003-jev-vs-bm25-heldout-runner_20260921T071400Z.yaml
+verification:
+  judge: PASS
+  review: REJECT
+unresolved:
+  - "No durable, on-disk two-arm run artifact where either arm reaches acceptance_ok: true (review finding H1). Only eval/results/20260921T070610Z-jev-vs-bm25/ exists and it is operator-interrupted (bm25.json: cline_exit_code 137, acceptance_ok false; jev.json absent)."
+  - "jev arm's positive canonicalization path has no live-jegrep evidence: OPENROUTER_API_KEY / TYPESAFE_API_KEY is absent from this environment (checked for presence/absence only, value not inspected), so jegrep cannot run and only the fail-closed rejection path has been exercised for real."
+next_action: "Do not move to done. Builder (next session, with the required API key present) must produce and preserve one complete eval/results/<run>/ directory from `python -m eval.run_jev_vs_bm25 --repo C:/Users/joz/Documents/miro-clone --sandbox-image locagent-cline:stage1-v4 --timeout 300` before resubmission. Verifier role does not implement or repair code."
+message: |
+  Verified per AGENTS.md verifier protocol: judge PASS (reproduced), protected zones intact
+  (git diff on contracts/scripts/judge.sh/verify.sh/AGENTS.md/decisions empty, git_ref matches
+  baseline), non-empty review present. Review verdict is REJECT on the task's own acceptance
+  criteria (no durable end-to-end two-arm run artifact). REJECT upheld; task stays in
+  state/queue/in_progress/, not moved to done.

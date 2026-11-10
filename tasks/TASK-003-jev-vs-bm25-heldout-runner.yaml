@@ -1,0 +1,139 @@
+id: TASK-003-jev-vs-bm25-heldout-runner
+title: Runner de edicion held-out sin paths, bajo estado GESTADO, comparando BM25+AST vs Jev+AST con handoff canonico al ejecutor
+objective: >
+  Construir un runner en eval/ que ejecute, sobre un unico caso de EDICION
+  held-out (no incluido en eval/miro_clone_localization.jsonl, no visto por
+  ninguna corrida previa) cuyo prompt es deliberadamente path-free (no
+  menciona nombres de archivo ni de entidad), dos brazos experimentales
+  equivalentes salvo en el mecanismo de localizacion:
+    - Brazo A: Gestado + graph_search (BM25, dependency_graph/ts_bm25.py) + AST
+    - Brazo B: Gestado + graph_semantic_search (Jev/jegrep,
+      locagent_mcp.py:_jegrep_hits) + AST
+  Ambos brazos deben:
+  (1) usar el mismo prompt path-free, el mismo modelo ejecutor, el mismo
+  sandbox (`--sandbox-image locagent-cline:stage1`, mismo patron que
+  eval/run_matrix.py / eval/container/), el mismo commit pineado de
+  miro-clone, y los mismos acceptance gates del caso held-out;
+  (2) gestionar el estado del ejecutor entre pasos con el runtime GESTADO
+  (`C:/Users/joz/orca/workspaces/Gestado/cabezon`, fusion determinista
+  Sigma(t+1) = Sigma(t) xor DeltaSigma(t), ver docs/TYPESCRIPT_PORT_PLAN.md
+  seccion "Experimento GESTADO x locagent-ts") en vez del `carry.json` ad hoc
+  de eval/render_step.py -- no un transcript acumulado sin limite;
+  (3) editar de verdad -- no solo localizar -- sobre un worktree aislado y
+  descartable de miro-clone por corrida (mismo mecanismo que
+  eval/isolated_env.py / eval/run_matrix.py), y validar el resultado con los
+  comandos de `acceptance` declarados en el fixture held-out;
+  (4) en el brazo Jev, garantizar que el ranking crudo de jegrep y sus
+  snippets de texto NUNCA llegan al ejecutor: los paths que devuelve jegrep
+  se canonicalizan primero contra ids de entidad del grafo AST
+  (dependency_graph, no solo contra nodos file como hace hoy _jegrep_hits) y
+  solo el paquete resultante de entidades permitidas (paths/ids canonicos,
+  sin el texto de jegrep) se entrega como contexto de localizacion al
+  ejecutor -- cualquier path de jegrep que no resuelva a una entidad del
+  grafo se descarta y cuenta como guard rejection, nunca se filtra al
+  ejecutor sin resolver.
+  El resultado de cada corrida debe quedar en un artefacto durable
+  (JSON/JSONL en eval/results/) que registre, por brazo: exito end-to-end de
+  la edicion (aplica + pasa `acceptance`), metricas de localizacion de
+  eval/metrics.py a nivel de entidad, tokens/llamadas consumidos, wall time,
+  guard rejections (paths de jegrep descartados por no resolver a entidad),
+  tamano del paquete canonico entregado al ejecutor, y el resultado de la
+  validacion post-edicion.
+authority:
+  can_modify:
+    - eval/**
+context: >
+  graph_semantic_search ya existe (TASK-002, aceptada) y cae a graph_search
+  cuando jegrep falla o da cero hits, pero esa integracion no tiene todavia
+  una comparacion cuantitativa cabeza a cabeza a nivel de edicion completa:
+  no hay corpus held-out path-free de tipo edit, no hay canonicalizacion de
+  paths de jegrep a ids de entidad del grafo (hoy _jegrep_hits solo valida
+  contra nodos file, ver locagent_mcp.py lineas ~491-524), y las corridas de
+  jev-readiness existentes (eval/results/jev-readiness-e6-20260921/) no
+  aislan el mecanismo BM25 vs Jev como variable unica -- miden un ejecutor
+  completo (Cline + qwen) sin controlar por handoff canonico ni por estado
+  GESTADO.
+  Un paquete previo de esta misma tarea (superado por esta revision) acoto
+  el entregable a un runner de solo-localizacion (sin editar, sin worktree
+  de escritura, sin GESTADO, sin distincion entre ranking crudo de Jev y
+  paquete canonico entregable). Esa version subestimaba el experimento
+  aprobado por el usuario: el punto no es solo comparar rankings de
+  localizacion, es demostrar que un ejecutor puede editar de punta a punta
+  usando exclusivamente el paquete canonico de entidades (nunca el
+  ranking/snippets crudos de jegrep) y que el estado entre pasos lo lleva
+  GESTADO, no un carry de texto libre. Esta revision reemplaza integramente
+  esa version anterior; no coexisten dos definiciones del entregable.
+  "Path-free" sigue siendo la propiedad clave del caso held-out: el prompt
+  debe describir el cambio por comportamiento/sintoma observable (p.ej. "el
+  checkbox de completado no persiste al recargar"), nunca por nombre de
+  archivo, componente o funcion -- si el prompt nombra el target, BM25 gana
+  trivialmente por coincidencia lexica y la comparacion no mide nada. El
+  caso held-out vive en un fixture nuevo de eval/ (no se agrega a
+  eval/miro_clone_localization.jsonl, que ya esta pineado en
+  pinned_at=da9acfe y es corpus de otro experimento), declara su propio
+  gt_entities/gt_files siguiendo el esquema de eval/README.md ("Corpus"), y
+  declara los comandos `acceptance` (shell, exit 0) que certifican que la
+  edicion aplicada es correcta -- el mismo esquema que los registros `e*` de
+  miro_clone_localization.jsonl.
+  El repo objetivo sigue siendo C:/Users/joz/Documents/miro-clone -- un
+  repo git distinto de este -- asi que, por contracts/project.md invariante
+  6, authority.can_modify de PAIOS no puede ver ni verificar ningun cambio
+  hecho ahi; el runner debe producir evidencia verificable *dentro de este
+  repo* (los artefactos JSON/JSONL en eval/results/) de que ambos brazos
+  efectivamente se ejecutaron contra un worktree aislado de miro-clone,
+  aplicaron una edicion real, y esa edicion paso (o no) los `acceptance` del
+  fixture. "Aislado" significa el mismo aislamiento de filesystem/proceso que
+  ya usan eval/isolated_env.py / eval/run_matrix.py / eval/container
+  (worktree descartable + sandbox de contenedor, nunca el checkout vivo del
+  usuario) -- a diferencia de la version anterior de esta tarea, esta si
+  requiere el sandbox de eval/container/ porque ahora hay escritura real
+  ejecutada por un agente.
+acceptance:
+  - Existe un modulo runner en eval/ (p.ej. eval/run_jev_vs_bm25.py) que
+    ejecuta el caso held-out de tipo edit en dos brazos -- Gestado+BM25+AST y
+    Gestado+Jev+AST -- con el mismo prompt path-free, el mismo modelo
+    ejecutor, el mismo sandbox-image, el mismo commit pineado de miro-clone
+    y los mismos acceptance gates del fixture para ambos brazos
+  - El caso held-out es un fixture nuevo de tipo edit (no
+    eval/miro_clone_localization.jsonl), su prompt no contiene ningun nombre
+    de archivo, componente, hook o funcion del repo objetivo, declara
+    gt_entities/gt_files siguiendo el esquema de eval/README.md ("Corpus") y
+    declara sus propios comandos `acceptance` (shell, exit 0) para validar
+    la edicion aplicada
+  - Ambos brazos editan sobre un worktree aislado y descartable de
+    miro-clone por corrida (mismo mecanismo que eval/isolated_env.py /
+    eval/run_matrix.py, con `--sandbox-image locagent-cline:stage1` o
+    equivalente de eval/container/), nunca contra el checkout vivo del
+    usuario; el artefacto de resultado referencia que worktree se uso por
+    brazo
+  - El estado del ejecutor entre pasos, en ambos brazos, se gestiona con el
+    runtime GESTADO (fusion determinista de estado, sin transcript
+    acumulado sin limite) en vez de un carry ad hoc; se documenta como el
+    runner invoca GESTADO y que forma tiene Sigma(t) para este caso
+  - "En el brazo Jev: los paths que devuelve jegrep se canonicalizan contra
+    ids de entidad del grafo AST (dependency_graph) antes de construir el
+    paquete que se entrega al ejecutor; el ranking crudo de jegrep y sus
+    snippets de texto nunca se pasan al ejecutor -- solo el paquete
+    canonico de entidades permitidas; todo path que no resuelva a una
+    entidad se descarta y se cuenta como guard rejection en el artefacto de
+    resultado, documentando la funcion/modulo que hace esa canonicalizacion"
+  - El artefacto de resultado por brazo registra, como minimo -- exito
+    end-to-end de la edicion (aplica + pasa `acceptance` del fixture),
+    metricas de localizacion de eval/metrics.py a nivel de entidad
+    (acc@k/recall@k/precision@k), tokens/llamadas consumidos, wall time,
+    conteo de guard rejections, tamano del paquete canonico entregado al
+    ejecutor, y el resultado (pass/fail por comando) de la validacion
+    post-edicion
+  - "python -m eval.metrics --gt <fixture-held-out> --pred <artefacto de
+    cada brazo> corre sin error y produce acc@k/recall@k/precision@k a nivel
+    de entidad para ambos brazos, comparables uno junto al otro"
+  - Se documenta explicitamente (en el modulo o en un reporte adjunto en
+    eval/) que evidencia de este repo certifica que ambos brazos tocaron
+    miro-clone, aplicaron una edicion real y que valido cada uno, por la
+    limitacion de authority.can_modify cross-repo (contracts/project.md
+    invariante 6)
+  - "bash scripts/judge.sh current -> PASS"
+  - "Existe una review no vacia en
+    state/reviews/TASK-003-jev-vs-bm25-heldout-runner_review.md"
+priority: high
+status: pending

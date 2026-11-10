@@ -1,0 +1,16 @@
+task: TASK-003-jev-vs-bm25-heldout-runner
+agent: verifier
+timestamp: 2026-11-10T15:49:40Z
+inputs:
+  - state/deltas/20261109T233603Z_TASK-003-jev-vs-bm25-heldout-runner_builder.yaml
+  - state/reviews/TASK-003-jev-vs-bm25-heldout-runner_review.md
+outputs:
+  - state/queue/done/TASK-003-jev-vs-bm25-heldout-runner
+  - state/verification/TASK-003-jev-vs-bm25-heldout-runner_20261110T154940Z.yaml
+verification:
+  judge: PASS
+  review: PASS
+unresolved: []
+next_action: none
+message: |
+  Task accepted by verifier. Protected paths unchanged or human-approved. Moved to done.

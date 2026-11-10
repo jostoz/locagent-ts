@@ -1,0 +1,14 @@
+task: TASK-003-jev-vs-bm25-heldout-runner
+agent: builder
+timestamp: 2026-11-09T23:36:03Z
+inputs: []
+outputs:
+  - raw: |
+      [{"path":"eval/chat_template_qwen_fixed.jinja","change":"template froggeric v22.5 enable_thinking=false; aplicado server-side en LM Studio GUI (Load->Chat Template)"},{"path":"eval/cline_runner.py","change":"propaga temperature/reasoning_max_tokens"},{"path":"eval/container/entrypoint.sh","change":"inyecta temperature/reasoning.maxTokens en providers.json"},{"path":"eval/run_jev_vs_bm25.py","change":"DEFAULT_TEMPERATURE=0.0, DEFAULT_REASONING_MAX_TOKENS=8000"}]
+verification:
+  judge: pending
+  review: pending
+unresolved: []
+next_action: review
+message: |
+  Addendum post-done: fix reasoning (Qwen template) corrige loops/timeouts del ejecutor.

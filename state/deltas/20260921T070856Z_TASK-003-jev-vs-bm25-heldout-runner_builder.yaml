@@ -1,0 +1,24 @@
+task: TASK-003-jev-vs-bm25-heldout-runner
+agent: builder
+timestamp: 2026-09-21T07:08:56Z
+inputs: []
+outputs:
+  - raw: |
+      [
+      {"path":"eval/jev_canonicalize.py","change":"new: jegrep-hit to AST-entity canonicalization, fail-closed guard rejections"},
+      {"path":"eval/localize_helper.py","change":"new: subprocess-isolated per-arm localization (BM25 TsBM25Index retrieve vs jev canonicalize_query); fixed stray stdout leak"},
+      {"path":"eval/gestado_state.py","change":"new: Sigma(t) wrapper over gestado.stateful.merge_state replacing ad-hoc carry.json"},
+      {"path":"eval/heldout_edit_case.jsonl","change":"new held-out path-free edit fixture h1 (updateNoteRotation), fixed broken acceptance regex"},
+      {"path":"eval/run_jev_vs_bm25.py","change":"new: two-arm Gestado+BM25+AST vs Gestado+Jev+AST edit runner over isolated worktrees + sandbox"},
+      {"path":"eval/cline_runner.py","change":"fix: named sandbox containers + explicit docker kill on TimeoutExpired to stop orphaned-container leak"},
+      {"path":"eval/results/TASK-003-status-20260921.md","change":"honest status report: verified units/checks, one confirmed successful bm25 run since deleted, operator-interrupted final run left on disk"}
+      ]
+verification:
+  judge: PASS
+  review: pending
+unresolved:
+  - "No complete, on-disk two-arm run artifact currently proves both arms reached the GESTADO 'validated' phase in the same run: the only successful full bm25 completion (run 20260921T062159Z: real edit applied to useStickyNotes.ts:updateNoteRotation, tsc passed) was overwritten by a later debugging iteration before the operator's stop-retries instruction landed. Only eval/results/20260921T070610Z-jev-vs-bm25/ remains, and it is operator-interrupted (bm25 killed mid-run, cline_exit_code 137; jev has no jev.json)."
+  - "jev arm's canonical package is empty in every run because jegrep hard-requires a paid OpenRouter/typesafe API key that this environment/task constraint does not provide -- this is the designed fail-closed behavior (see eval/jev_canonicalize.py), not a bug, but it means no run so far exercised the jev arm's positive canonicalization path against live jegrep output (only the offline unit test in eval/results/TASK-003-status-20260921.md exercises that path)."
+next_action: "Reviewer/verifier (or next builder session): run `python -m eval.run_jev_vs_bm25 --repo C:/Users/joz/Documents/miro-clone --sandbox-image locagent-cline:stage1-v4 --timeout 300` once more (container-leak fix makes retries safe) and keep the resulting eval/results/<run>/ directory as the durable two-arm evidence artifact before writing state/reviews/TASK-003-jev-vs-bm25-heldout-runner_review.md. Builder does not self-review and does not move the task to done."
+message: |
+  impl+partial run; stopped mid-verification per operator; see eval/results/TASK-003-status-20260921.md

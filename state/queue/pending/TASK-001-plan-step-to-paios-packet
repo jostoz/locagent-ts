@@ -1,0 +1,35 @@
+id: TASK-001-plan-step-to-paios-packet
+title: Traducir el Plan/Step JSON del planificador a un packet de tarea PAIOS
+objective: >
+  eval/planner.py produce un plan JSON (steps[] con target_file, edit_spec,
+  acceptance_check, max_edit_lines). Escribir el traductor que convierte ese
+  plan en uno o más tasks/TASK-XXX.yaml válidos para el mecanismo de PAIOS
+  (claim.sh / judge.sh / verify.sh de este repo), y resolver la pregunta de
+  granularidad dejada abierta en paios-bootstrap/decisions/0018 (ítem 3):
+  ¿un packet por tarea del corpus, o uno por paso del plan?
+authority:
+  can_modify:
+    - eval/**
+context: >
+  Ver paios-bootstrap/decisions/0018-integracion-locagent-ts-stage2.md para
+  el razonamiento completo de por qué esta tarea existe. El ejecutor real
+  (9b vía Cline, eval/cline_runner.py con disable_shell=True) corre aislado
+  y sus ediciones caen sobre C:/Users/joz/Documents/miro-clone -- un repo
+  git distinto de este -- así que authority.can_modify de PAIOS (git diff
+  local) no puede verificar esos cambios directamente. Esta tarea debe
+  decidir y documentar cómo se maneja eso (ver contracts/project.md
+  invariante 6), no solo escribir el traductor ignorando el problema.
+acceptance:
+  - Existe un módulo (p.ej. eval/paios_packet.py) que toma un plan de
+    eval/planner.py y produce YAML(s) válidos para tasks/
+  - La granularidad (un packet por tarea vs. uno por paso) queda decidida y
+    justificada por escrito, no implícita en el código
+  - "Prueba de regresión concreta: la tarea de estrés opacidad debe pasar por
+    claim -> build -> judge.sh -> emit_delta -> review -> verify.sh; documentar
+    qué puede verificar PAIOS y qué requiere revisión humana por ocurrir en
+    miro-clone, un repositorio externo"
+  - "bash scripts/judge.sh current → PASS"
+  - "Existe una review no vacía en
+    state/reviews/TASK-001-plan-step-to-paios-packet_review.md"
+priority: high
+status: pending

@@ -27,6 +27,15 @@ JSON
 else
 rm -f /state/settings/cline_mcp_settings.json
 fi
+if [ -n "${CLINE_DISABLED_TOOLS:-}" ]; then
+node -e '
+const fs = require("fs");
+const tools = process.env.CLINE_DISABLED_TOOLS.split(",").map(s => s.trim()).filter(Boolean);
+fs.writeFileSync("/state/settings/global-settings.json", JSON.stringify({disabledTools: tools}));
+'
+else
+rm -f /state/settings/global-settings.json
+fi
 if [ "${ENABLE_TGREP_MCP:-0}" = "1" ]; then
   node -e '
 const fs = require("fs");
@@ -51,11 +60,29 @@ fi
 # Cline otherwise assumes the provider's advertised maximum completion size.
 # Serverless providers reject that reservation when the account balance cannot
 # cover it, even though agent turns normally use far fewer tokens.
+#
+# temperature=0 forces greedy decoding: identical input, identical output,
+# every run -- without it, qwen3.8-27b under tool-calling pressure shows real
+# sampling variance (confirmed empirically: same canonical package produced a
+# clean 5-call success once and a 132-call identical-chunk loop another time).
+#
+# CLINE_REASONING_MAX_TOKENS is a hard cap on reasoning tokens, not a request
+# like --thinking/reasoning_effort (which the model can and does ignore under
+# load -- confirmed: --thinking none alone still let qwen3.8-27b reason freely
+# in several transcripts this session). 0 or unset disables the cap.
+: "${CLINE_TEMPERATURE:=0}"
+: "${CLINE_REASONING_MAX_TOKENS:=0}"
 node -e '
 const fs = require("fs");
 const p = "/state/settings/providers.json";
 const d = JSON.parse(fs.readFileSync(p, "utf8"));
-d.providers[process.env.CLINE_PROVIDER].settings.maxTokens = Number(process.env.CLINE_MAX_TOKENS);
+const s = d.providers[process.env.CLINE_PROVIDER].settings;
+s.maxTokens = Number(process.env.CLINE_MAX_TOKENS);
+s.temperature = Number(process.env.CLINE_TEMPERATURE);
+const reasoningMax = Number(process.env.CLINE_REASONING_MAX_TOKENS);
+if (reasoningMax > 0) {
+  s.reasoning = Object.assign({}, s.reasoning, {enabled: true, maxTokens: reasoningMax});
+}
 fs.writeFileSync(p, JSON.stringify(d));
 '
 

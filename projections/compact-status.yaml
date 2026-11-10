@@ -1,0 +1,16 @@
+project: locagent-ts
+generated: "2026-09-21T05:47:07Z"
+latest_event:
+  task: TASK-002-jev-semantic-search
+  agent: verifier
+  timestamp: "2026-09-20T23:32:35Z"
+queue:
+  pending: 2
+  in_progress: 0
+  blocked: 0
+  done: 1
+blockers: []
+pending_approvals: []
+attempts_warning: []
+health: green
+next_action: 'claim TASK-001-plan-step-to-paios-packet: run ./scripts/claim.sh TASK-001-plan-step-to-paios-packet'

@@ -1,0 +1,7 @@
+task: TASK-003-jev-vs-bm25-heldout-runner
+timestamp: 2026-11-10T15:49:40Z
+result: ACCEPTED
+judge: PASS
+protected_paths: unchanged_or_approved
+review: present
+delta_ref: state/deltas/20261109T233603Z_TASK-003-jev-vs-bm25-heldout-runner_builder.yaml
