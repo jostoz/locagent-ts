@@ -202,8 +202,22 @@ def _run_record(record: dict, *, condition: str, source_repo: Path, run_dir: Pat
             raise RuntimeError(
                 'executor changed the source checkout outside its worktree; '
                 'aborting to preserve user changes')
-        guard = analyze(result.transcript, repo=str(repo), target_file=(plan or {}).get('target_file'),
-                        expect_edit=is_edit, baseline_ref=baseline,
+        # Resolved once per step, before the guard call: the previous version
+        # passed target_file=(plan or {}).get('target_file') to analyze(),
+        # which is always None (a plan's target_file lives per-step, never at
+        # the top level) -- off_target_edit silently never fired in planned
+        # mode. operation is needed by analyze() too now, to tell a genuine
+        # no-progress edit apart from a successful file creation (git diff
+        # --numstat ignores untracked files, see eval/guard.py).
+        step_target_file = None
+        operation = None
+        if plan is not None and step is not None:
+            step_item = next((item for item in plan['steps'] if item['n'] == step), None)
+            if step_item is not None:
+                step_target_file = step_item.get('target_file')
+                operation = step_item.get('operation')
+        guard = analyze(result.transcript, repo=str(repo), target_file=step_target_file,
+                        expect_edit=is_edit, baseline_ref=baseline, operation=operation,
                         shell='linux' if sandbox_image else 'windows')
         runs.append({'step': step, 'exit': result.exit_code, 'flake': result.flake,
                      'wall_s': result.wall_s, 'graph_calls': result.transcript.n_graph,
@@ -211,9 +225,6 @@ def _run_record(record: dict, *, condition: str, source_repo: Path, run_dir: Pat
                      'entities': _entities_from_run(result),
                      'stderr_tail': result.stderr_tail})
         fatal = {'shell_write', 'tmp_file', 'off_target_edit', 'whole_file_rewrite'}
-        operation = None
-        if plan is not None and step is not None:
-            operation = next((item.get('operation') for item in plan['steps'] if item['n'] == step), None)
         if is_edit and (condition == 'solo' or operation in {'create', 'edit'}):
             fatal.add('no_progress')
         if result.flake != 'ok' or any(flag in fatal for flag in guard.flags):

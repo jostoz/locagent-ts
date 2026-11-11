@@ -1,0 +1,14 @@
+task: TASK-004-guard-no-progress-false-positive-on-create
+agent: builder
+timestamp: 2026-11-11T13:34:41Z
+inputs: []
+outputs:
+  - raw: |
+      [{"path":"eval/guard.py","change":"analyze() nuevo param operation; no_progress chequea untracked target_file via git status cuando operation=create, antes solo git diff --numstat (ignora untracked)"},{"path":"eval/run_matrix.py","change":"analyze() ahora recibe target_file/operation reales del step actual (antes plan.get(target_file), siempre None, bug secundario); calculo de operation movido antes del guard call"},{"path":"eval/test_guard.py","change":"nuevo, 4 tests con worktree git real: create exitoso no flaggeado, create sin archivo si flaggeado, edit 0-cambios en tracked si flaggeado (no regresion), edit con cambios reales no flaggeado"},{"path":"eval/results/20261111T133217Z/","change":"prueba de regresion real sobre e3: los 3 steps del plan corren (antes se cortaba en step 1); acceptance_ok:false por un fallo real del modelo (campo locked nunca agregado a BoardShape), no por el guard -- exactamente el comportamiento que TASK-001 (gate en final_acceptance) debe capturar"}]
+verification:
+  judge: pending
+  review: pending
+unresolved: []
+next_action: review
+message: |
+  guard.analyze: no_progress ya no bloquea create exitoso. e3 real: 3/3 steps corren.

@@ -117,6 +117,7 @@ def analyze(
     baseline_ref: Optional[str] = None,
     step_done_marker: str = 'STEP DONE',
     shell: str = 'windows',
+    operation: Optional[str] = None,
 ) -> GuardReport:
     rep = GuardReport()
 
@@ -183,9 +184,20 @@ def analyze(
             changed = diff_numstat(repo, baseline_ref)
             rep.details['diff_files'] = changed
             if expect_edit:
+                # git diff --numstat ignores untracked files by design, so a
+                # successful `operation: create` step always reads 0 lines
+                # touched here -- `new_paths` (git status --porcelain,
+                # already computed above) is the only signal that actually
+                # sees a freshly created file. Confirmed false positive:
+                # eval/results/20261110T184104Z/planned-e3.summary.json,
+                # step 1 (create src/board/lockGuard.ts) succeeded but was
+                # flagged no_progress anyway, cutting the plan before its
+                # later wiring step ever ran.
+                created_target = (operation == 'create' and target_file
+                                   and target_file in new_paths)
                 touched = sum(changed.values())
                 said_done = step_done_marker.lower() in tr.final_text.lower()
-                if touched == 0 and (said_done or tr.finish_reason == 'completed'):
+                if touched == 0 and not created_target and (said_done or tr.finish_reason == 'completed'):
                     rep.add('no_progress', 'edit expected, 0 lines changed')
                 if target_file:
                     stray = [p for p in changed if p != target_file
