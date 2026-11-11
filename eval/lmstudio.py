@@ -109,6 +109,53 @@ def ensure_loaded(model: str = MODEL_9B, ctx: int = DEFAULT_CTX) -> None:
     load(model, ctx)
 
 
+def assert_reasoning_disabled(model: str, base_url: str = f'http://127.0.0.1:{PORT}/v1') -> None:
+    """Hard preflight gate: fail loudly before a corpus run instead of
+    discovering mid-run that LM Studio's GUI-level ``Enable Thinking``
+    toggle (or a stale ``lms load`` that ignored the saved preset) left
+    hidden reasoning on. ``lms load`` does not apply a saved GUI preset
+    (confirmed empirically, 2026-11-11): a model loaded via the CLI comes
+    up with reasoning enabled by default regardless of what preset was
+    last saved in the GUI, and the only way to turn it off is the GUI
+    toggle itself -- see ``skill://lmstudio-reasoning-control`` step 3.
+
+    A deterministic smoke request (temperature=0, trivial arithmetic) is
+    the only reliable signal: the model-list endpoint's loaded config
+    never exposes the Enable Thinking state, only context/batch/offload
+    settings. Raises RuntimeError naming the exact GUI fix instead of
+    silently burning a 20+ minute corpus run on a reasoning-polluted model.
+    """
+    import json
+    import urllib.request
+
+    payload = json.dumps({
+        'model': model, 'temperature': 0,
+        'messages': [{'role': 'user', 'content': 'What is 11*13? Answer with just the number.'}],
+    }).encode('utf-8')
+    req = urllib.request.Request(
+        f'{base_url}/chat/completions', data=payload,
+        headers={'Content-Type': 'application/json'}, method='POST')
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read())
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(
+            f'lmstudio preflight: could not reach {base_url} for model {model!r} '
+            f'-- is LM Studio running and the model loaded? ({exc})') from exc
+    reasoning_tokens = (data.get('usage', {})
+                        .get('completion_tokens_details', {})
+                        .get('reasoning_tokens', 0))
+    if reasoning_tokens:
+        raise RuntimeError(
+            f'lmstudio preflight FAILED: model {model!r} answered a trivial '
+            f'prompt with {reasoning_tokens} reasoning tokens even at '
+            f'temperature=0. Enable Thinking is ON in the LM Studio GUI (or '
+            f'the model was loaded via `lms load`, which ignores any saved '
+            f'preset). Fix: open LM Studio -> Local Server -> the model -> '
+            f'Inference tab -> Reasoning -> turn Enable Thinking OFF, then '
+            f'reload the model -- see skill://lmstudio-reasoning-control.')
+
+
 def swap_model(to_model: str, ctx: int = DEFAULT_CTX) -> None:
     """Unload whatever is up and load *to_model* -- for the local strong-planner
     fallback (9b <-> 35b-a3b) since 24 GB VRAM can't hold both."""

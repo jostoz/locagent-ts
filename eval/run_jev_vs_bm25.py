@@ -49,6 +49,7 @@ from typing import Any, Dict, Optional
 from eval.cline_runner import run_once
 from eval.gestado_state import advance, initial_sigma
 from eval.guard import analyze
+from eval.lmstudio import assert_reasoning_disabled
 from eval.metrics import evaluate, to_file_level
 from eval.run_matrix import _acceptance, _git, _worktree
 from eval.score import validate_corpus
@@ -266,8 +267,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     if record['id'] in localization_corpus_ids:
         raise SystemExit(f'record {record["id"]!r} must stay OUT of {stage1_corpus.name} (held-out requirement)')
 
+    assert_reasoning_disabled(args.model)
     run_dir = args.out_dir or (HERE / 'results' / f'{args.run_id}-jev-vs-bm25')
-    run_dir.mkdir(parents=True, exist_ok=True)
 
     arm_results = {}
     predictions = {}

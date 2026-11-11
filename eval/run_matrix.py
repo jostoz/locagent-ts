@@ -26,6 +26,7 @@ from typing import Iterable, Optional
 
 from eval.cline_runner import run_once
 from eval.guard import analyze
+from eval.lmstudio import assert_reasoning_disabled
 from eval.metrics import _load_jsonl, evaluate, to_file_level
 from eval.planner import mark_big_files, plan_task, validate_plan
 from eval.render_step import render
@@ -268,6 +269,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     problems = validate_corpus(str(HERE / 'miro_clone_localization.jsonl'))
     if problems:
         raise SystemExit('\n'.join(problems))
+    assert_reasoning_disabled(args.model)
     records = _load_jsonl(str(HERE / 'miro_clone_localization.jsonl'))
     if args.tasks:
         wanted = set(args.tasks.split(','))
