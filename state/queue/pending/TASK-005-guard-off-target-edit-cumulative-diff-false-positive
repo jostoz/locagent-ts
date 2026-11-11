@@ -1,0 +1,64 @@
+id: TASK-005-guard-off-target-edit-cumulative-diff-false-positive
+title: "guard.analyze(): off_target_edit falso positivo por diff acumulado del plan completo, no incremental por step"
+objective: >
+  eval/guard.py::analyze() detecta `off_target_edit` comparando
+  `diff_numstat(repo, baseline_ref)` contra `target_file` del step actual
+  (eval/guard.py:191-195). `baseline_ref` se calcula UNA sola vez en
+  eval/run_matrix.py:183 (`baseline = _git(repo, 'rev-parse', 'HEAD')`, antes
+  del loop de steps) y se reusa sin cambios en cada llamada a analyze() para
+  cada step del plan (eval/run_matrix.py:221). Por lo tanto `changed` en el
+  guard de un step N incluye TODOS los archivos editados desde el inicio del
+  plan, no solo lo que pasó en el step N -- cualquier archivo editado
+  legítimamente en un step ANTERIOR (distinto al target_file del step actual)
+  se marca como "stray" / off_target_edit, aunque el ejecutor no haya tocado
+  nada fuera de lo pedido en el step actual.
+
+  Confirmado en una corrida real (e6, 2026-11-11, 20261111T140505Z/planned-e6.summary.json):
+  step 1 edita src/board/useStickyNotes.ts (correcto, agrega
+  isTextBoxNote). Step 2 edita src/board/Board.tsx (correcto, el import) --
+  pero el guard del step 2 ve useStickyNotes.ts con 2 líneas cambiadas en el
+  diff ACUMULADO (las mismas del step 1, no una edición nueva) y lo marca
+  off_target_edit, que es fatal (eval/run_matrix.py:227 `fatal =
+  {'shell_write', 'tmp_file', 'off_target_edit', 'whole_file_rewrite'}`) --
+  corta el plan antes del step 3 (el wiring real del ternario).
+
+  Este bug era invisible hasta TASK-004 (2026-11-11): antes, `target_file`
+  llegaba siempre None a analyze() (bug distinto, ya arreglado), así que
+  `if target_file:` descartaba todo el chequeo de off_target_edit sin
+  importar qué tan roto estuviera el diseño de abajo. El fix de TASK-004 lo
+  expuso sin querer.
+authority:
+  can_modify:
+    - eval/**
+context: >
+  Encontrado al correr `python -m eval.run_matrix --condition both` sobre el
+  corpus completo tras TASK-004 (eval/results/20261111T140505Z/). Esta
+  corrida es la primera comparación limpia solo-vs-planned con el ejecutor
+  ya arreglado (reasoning, contextWindow, no_progress) -- su resultado
+  (solo superó a planned en ambas categorías) no es confiable todavía
+  precisamente por este bug: al menos uno de los fallos de "planned"
+  (e6) es un artefacto del guard, no una falla real del modelo. No se puede
+  sacar ninguna conclusión del experimento Stage 1/2 (¿ayuda el
+  planificador?) hasta resolver esto y re-correr.
+acceptance:
+  - "Existe un test de regresión en eval/test_guard.py que reproduce el caso
+    exacto: un worktree git real con 2 steps simulados (step 1 edita
+    archivo A, step 2 edita archivo B distinto) donde cada analyze() recibe
+    el baseline_ref correcto para SU step (incremental, no el del plan
+    completo) -- confirmando que off_target_edit NO se dispara para el
+    archivo A en el guard del step 2."
+  - "eval/run_matrix.py recalcula o pasa un baseline incremental por step
+    (p.ej. el HEAD del worktree al INICIO de cada step, no al inicio del
+    plan) a analyze(), preservando la detección real de off_target_edit:
+    un step que edita un archivo fuera de SU PROPIO target_file (no de
+    steps anteriores) debe seguir disparando el flag."
+  - "Re-correr e6 real (python -m eval.run_matrix --condition planned --tasks
+    e6 --plans-dir eval/plans --sandbox-image locagent-cline:stage1-v4
+    --repo C:/Users/joz/Documents/miro-clone) y confirmar que los 3 steps
+    del plan corren (no se corta en el step 2 por un archivo editado en el
+    step 1)."
+  - "bash scripts/judge.sh current -> PASS"
+  - "Existe una review no vacía en
+    state/reviews/TASK-005-guard-off-target-edit-cumulative-diff-false-positive_review.md"
+priority: high
+status: pending
